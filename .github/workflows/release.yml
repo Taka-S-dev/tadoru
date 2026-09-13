@@ -1,0 +1,48 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: zip
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: tar.gz
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --target ${{ matrix.target }}
+      - name: Package
+        shell: bash
+        run: |
+          name="tadoru-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          mkdir "$name"
+          if [ "${{ matrix.archive }}" = zip ]; then
+            cp "target/${{ matrix.target }}/release/tadoru.exe" "$name/"
+            # The cmd and PowerShell shims look for tadoru.exe next to
+            # themselves first, so unpacking the zip into a PATH folder is
+            # the whole install.
+            "target/${{ matrix.target }}/release/tadoru.exe" init cmd --out "$name"
+            "target/${{ matrix.target }}/release/tadoru.exe" init powershell --out "$name"
+            7z a "$name.zip" "$name"
+          else
+            cp "target/${{ matrix.target }}/release/tadoru" "$name/"
+            tar czf "$name.tar.gz" "$name"
+          fi
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: tadoru-*.${{ matrix.archive }}

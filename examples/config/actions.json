@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "include_defaults": true,
+  "actions": [
+    {
+      "name": "Git status",
+      "program": "git",
+      "args": ["-C", "{dir}", "status", "--short"],
+      "target": "any",
+      "run": "terminal",
+      "key": "s"
+    },
+    {
+      "name": "Git log",
+      "program": "git",
+      "args": ["-C", "{dir}", "log", "--oneline", "-20"],
+      "target": "any",
+      "run": "terminal",
+      "key": "l"
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+# 許可リスト方式: いったん全部無視し、リポジトリの構成ファイルだけ戻す
+*
+!.gitignore
+!Cargo.toml
+!Cargo.lock
+!README.md
+!LICENSE
+!src/
+!src/**
+!tests/
+!tests/**
+!examples/
+!examples/**
+!.github/
+!.github/**
+!docs/
+!docs/guide/
+!docs/guide/**
+
+# 許可の後ろで再拒否(名前で指定)
+target/
+# 設計メモは非公開。docs/ 自体は許可しないと配下の guide に降りられないので、
+# 直下のファイルだけを名指しで拒否する
+docs/*.md
+docs/*/
+!docs/guide/
+# 画面のキャプチャ。docs/*/ で閉じた後なので、ここで名指しで開ける
+!docs/images/
+!docs/images/**
+.env
+.env.*
+secrets.*
+credentials.*
+*.pem
+id_rsa*
+# SSH の他の鍵形式と、証明書・キーストア・認証情報ファイル
+id_dsa*
+id_ecdsa*
+id_ed25519*
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+.netrc
+.npmrc

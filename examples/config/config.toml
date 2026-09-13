@@ -1,0 +1,18 @@
+# Every setting is optional. Delete a line to go back to the value shown here.
+
+# Enable only when your terminal uses a Nerd Font.
+icons = false
+
+# Click to select, wheel to move, and click mode labels to switch modes.
+mouse = true
+
+# Per-file temporary copy limit in MiB. 0 disables the action.
+temp_copy_max_mib = 100
+
+# Directory names skipped at any depth while scanning.
+exclude = [".git", "node_modules", "dist", "build", "target"]
+
+# How many entries one scan may collect. Every path found is kept in memory
+# until tadoru exits, so a scan started near the top of a drive is expensive.
+# The list says when it stopped early. 0 removes the ceiling.
+scan_limit = 200000
