@@ -282,8 +282,9 @@ struct RootVisit {
 /// How many steps each direction of the root history keeps, as in browse.
 const ROOT_HISTORY: usize = 100;
 
-/// The buttons drawn at the head of the header, mirroring Alt-Left, Alt-Right
-/// and Left so the same moves are reachable without the keyboard.
+/// The buttons drawn at the head of the header, mirroring the history keys
+/// (Ctrl or Alt with the arrows) and Left, so the same moves are reachable
+/// without the keyboard.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Nav {
     Back,
@@ -481,7 +482,7 @@ impl Picker {
             // quietly becoming a search of somewhere else.
             if self.root != before {
                 let root = self.root.display().to_string();
-                self.set_notice(format!("Searching from {root}  Alt-Left: back"));
+                self.set_notice(format!("Searching from {root}  Ctrl-Left: back"));
             }
             self.browser_root = self.root.clone();
         }
@@ -932,7 +933,12 @@ impl Picker {
             };
         }
         self.clear_notice();
-        if key.modifiers.contains(KeyModifiers::ALT)
+        // Ctrl does the same as Alt here. Terminals that use Alt with the
+        // arrows to move between panes never pass those keys on, and a history
+        // that only answers to them cannot be reached there at all.
+        if key
+            .modifiers
+            .intersects(KeyModifiers::ALT | KeyModifiers::CONTROL)
             && matches!(key.code, KeyCode::Left | KeyCode::Right)
         {
             self.navigate(if key.code == KeyCode::Right {
@@ -1391,7 +1397,7 @@ impl Picker {
             .title(Line::from(mode_tabs(Mode::Browse)))
             .title_bottom(footer_line(
                 self.notice.as_deref(),
-                " Left: up  Right: enter  Alt-Left/Right: history  Tab: mode  ^P: actions  ^B: pin  Enter: cd ",
+                " Left: up  Right: enter  Ctrl/Alt-Left/Right: history  Tab: mode  ^P: actions  ^B: pin  Enter: cd ",
             ));
         let inner = block.inner(area);
         frame.render_widget(block, area);
@@ -2694,6 +2700,14 @@ mod tests {
                     p.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::ALT));
                 }),
             ),
+            // Alt-Left has just used up the way back, so Ctrl is checked going
+            // forward here. Going back with Ctrl has a test of its own.
+            (
+                "Ctrl-Right",
+                Box::new(|p: &mut Picker| {
+                    p.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::CONTROL));
+                }),
+            ),
             (
                 "the back button",
                 Box::new(|p: &mut Picker| p.navigate(Nav::Back)),
@@ -2707,6 +2721,44 @@ mod tests {
             picker.switch_mode(-1);
             assert_eq!(picker.browser().cwd, moved, "browse stayed behind: {name}");
         }
+
+        crate::testing::remove_tree(&root);
+    }
+
+    #[test]
+    fn ctrl_arrows_step_through_history_where_alt_arrows_are_taken() {
+        let root =
+            crate::testing::temp_dir().join(format!("tadoru-ctrlnav-{}", std::process::id()));
+        let middle = root.join("a");
+        let deep = middle.join("b");
+        std::fs::create_dir_all(&deep).unwrap();
+        let ctrl = |code| KeyEvent::new(code, KeyModifiers::CONTROL);
+
+        // In browse: jump straight to a/b, so going back (to the root) and
+        // going up (to a) lead to different places and cannot be confused.
+        let mut picker = test_picker(root.clone(), Mode::Browse);
+        picker.browser().navigate_to(&deep);
+        assert_eq!(picker.browser().cwd, deep);
+        picker.handle_key(ctrl(KeyCode::Left));
+        assert_eq!(
+            picker.browser().cwd,
+            root,
+            "Ctrl-Left climbed instead of going back"
+        );
+        picker.handle_key(ctrl(KeyCode::Right));
+        assert_eq!(picker.browser().cwd, deep);
+        // The plain arrow still climbs one level.
+        picker.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+        assert_eq!(picker.browser().cwd, middle);
+
+        // In a search, the same keys walk the places the search started from.
+        let mut picker = test_picker(deep.clone(), Mode::Dirs);
+        picker.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+        assert_eq!(picker.root, middle);
+        picker.handle_key(ctrl(KeyCode::Left));
+        assert_eq!(picker.root, deep);
+        picker.handle_key(ctrl(KeyCode::Right));
+        assert_eq!(picker.root, middle);
 
         crate::testing::remove_tree(&root);
     }
@@ -2729,7 +2781,7 @@ mod tests {
         assert_eq!(picker.root, root);
         // Saying so is what stops it happening unnoticed.
         let notice = picker.notice.clone().expect("no notice");
-        assert!(notice.contains("Alt-Left"), "{notice}");
+        assert!(notice.contains("Ctrl-Left"), "{notice}");
 
         // One key puts it back, with what had been typed there.
         picker.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::ALT));
