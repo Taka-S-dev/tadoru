@@ -5,11 +5,10 @@ use crossterm::event::{KeyEvent, KeyModifiers};
 /// Whether a `KeyCode::Char` event belongs in a filter.
 ///
 /// Alt is a shortcut prefix in terminal applications, so Alt+d must not type
-/// a `d`. The filters used to accept it because they only tested for Ctrl.
+/// a `d`.
 ///
-/// AltGr arrives as Ctrl+Alt on Windows. The filters have never accepted it,
-/// and this keeps that unchanged rather than guessing at keyboard layouts
-/// that cannot be tested here.
+/// AltGr arrives as Ctrl+Alt on Windows, so characters typed with it do not
+/// reach the filters either.
 pub fn is_typed_text(key: &KeyEvent) -> bool {
     !key.modifiers
         .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)

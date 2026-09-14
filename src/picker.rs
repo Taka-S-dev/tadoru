@@ -1226,8 +1226,8 @@ impl Picker {
             Span::styled("─".repeat(rule_width), theme::BORDER),
         ]));
         frame.render_widget(info, info_area);
-        // The tabs go in the top border and the location takes the row they
-        // used to share, which stops a long path from reading as more tabs.
+        // The tabs sit in the top border and the path gets a row of its own,
+        // so a long path is not read as more tabs.
         // The buttons walk the places the search has started from, so they
         // belong on every mode that has a scan root, not only on browse.
         let (mut header, nav, after) = nav_buttons(
@@ -1337,8 +1337,8 @@ impl Picker {
         );
     }
 
-    /// The navigation buttons and the path, filling the row the mode tabs
-    /// used to share.
+    /// The navigation buttons and the path, on a row of their own below the
+    /// mode tabs.
     ///
     /// A path is long and changes with every move, so it gets a row to itself
     /// rather than trailing a list of tabs that never change. Records where
@@ -2363,8 +2363,8 @@ mod tests {
             .iter()
             .map(|cell| cell.symbol())
             .collect();
-        // Which folder is being filtered is still on screen, once: the path
-        // row names it, so the prompt no longer repeats it.
+        // The path row names the folder being filtered, so the prompt does
+        // not repeat it.
         assert!(!screen.contains("[Filter:"), "the label came back");
         let shown = root.join("C");
         assert!(
@@ -3361,7 +3361,7 @@ mod tests {
             .clone();
         picker.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), hit.x, hit.y));
         assert_eq!(picker.browser().cwd, sibling);
-        // The tabs no longer start at the first column: the navigation
+        // The tabs do not start at the first column: the navigation
         // buttons sit in front of them in browse mode.
         let header = picker.mouse_header;
         picker.handle_mouse(mouse(
@@ -3912,7 +3912,7 @@ mod tests {
 
     #[test]
     fn the_picker_takes_the_whole_window_whatever_the_history_above() {
-        // Shell history no longer costs the listing any rows: it scrolls up.
+        // Shell history costs the listing no rows: it scrolls up.
         assert_eq!(inline_height(50), 50);
         assert_eq!(inline_height(12), 12);
         // A terminal that reports nothing still gets a row to draw in.
