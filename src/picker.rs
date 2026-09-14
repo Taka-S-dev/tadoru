@@ -1325,6 +1325,16 @@ impl Picker {
             })
             .collect();
         frame.render_widget(List::new(items), rows_area);
+        // The right border is the track, so a list that ends at the bottom
+        // edge of the screen cannot pass for the whole result.
+        draw_scroll_thumb(
+            frame.buffer_mut(),
+            list_area.right().saturating_sub(1),
+            rows_area.y,
+            rows_area.height,
+            first as usize,
+            count as usize,
+        );
     }
 
     /// The navigation buttons and the path, filling the row the mode tabs
@@ -1539,6 +1549,18 @@ impl Picker {
             .collect();
         frame.render_widget(List::new(rows), current_area);
         self.mouse_rows = (current_area, first, shown);
+        // The separator to its right is the track, for the same reason as
+        // in the search list.
+        if sep2.width > 0 {
+            draw_scroll_thumb(
+                frame.buffer_mut(),
+                sep2.x,
+                current_area.y,
+                current_area.height,
+                first,
+                shown,
+            );
+        }
 
         // Preview column: contents of the selected directory. The listing is
         // loaded in the update phase, so a burst of scroll events costs no
@@ -1772,12 +1794,6 @@ fn footer_line(notice: Option<&str>, hints: &'static str) -> Line<'static> {
     }
 }
 
-/// First visible row that puts `focus` in the middle of a `height`-tall window.
-///
-/// The parent column is context, so the folders either side of the current one
-/// matter as much as the row itself; pinning it to the last line hid them and
-/// left the marker against the bottom edge. Near the ends of the list the
-/// window stops rather than scrolling past them.
 /// The row to draw first, given where the last frame started.
 ///
 /// The window only moves when the selection would fall outside it, which is
@@ -1799,6 +1815,12 @@ fn scroll_window(first: usize, selected: usize, count: usize, height: usize) -> 
     }
 }
 
+/// First visible row that puts `focus` in the middle of a `height`-tall window.
+///
+/// The parent column is context, so the folders either side of the current one
+/// matter as much as the row itself; pinning it to the last line hid them and
+/// left the marker against the bottom edge. Near the ends of the list the
+/// window stops rather than scrolling past them.
 fn centred_scroll(focus: usize, len: usize, height: usize) -> usize {
     if height == 0 || len <= height {
         return 0;
@@ -1806,6 +1828,57 @@ fn centred_scroll(focus: usize, len: usize, height: usize) -> usize {
     focus
         .saturating_sub(height / 2)
         .min(len.saturating_sub(height))
+}
+
+/// Where a scrollbar's thumb goes, as its first row and its length, or
+/// `None` when every row already fits.
+///
+/// The thumb reaches an end of the track only when the window reaches that
+/// end of the list. Rounding alone parks it on the last row while rows are
+/// still hidden below, which is the one thing a scrollbar must not say.
+fn scroll_thumb(first: usize, count: usize, height: usize) -> Option<(usize, usize)> {
+    if height == 0 || count <= height {
+        return None;
+    }
+    let len = (height * height / count).max(1);
+    let travel = height - len;
+    let last = count - height;
+    let first = first.min(last);
+    let start = if first == 0 {
+        0
+    } else if first == last {
+        travel
+    } else {
+        let start = (first * travel + last / 2) / last;
+        // A track too short to leave a row between its ends has nowhere
+        // else to put a position in the middle.
+        if travel >= 2 {
+            start.clamp(1, travel - 1)
+        } else {
+            start
+        }
+    };
+    Some((start, len))
+}
+
+/// Draws the thumb over a column that already holds a vertical line, so the
+/// line is the track and no row gives up a column of width to it.
+fn draw_scroll_thumb(
+    buffer: &mut ratatui::buffer::Buffer,
+    x: u16,
+    y: u16,
+    height: u16,
+    first: usize,
+    count: usize,
+) {
+    let Some((start, len)) = scroll_thumb(first, count, height as usize) else {
+        return;
+    };
+    for row in start..start + len {
+        if let Some(cell) = buffer.cell_mut((x, y + row as u16)) {
+            cell.set_symbol("┃").set_style(theme::SCROLL);
+        }
+    }
 }
 
 /// What browse should be showing when it lines up with the search, beyond
@@ -1951,6 +2024,9 @@ mod theme {
     use ratatui::style::{Color, Modifier, Style};
 
     pub const BORDER: Style = Style::new().fg(Color::Indexed(240));
+    /// The scrollbar's thumb, drawn over a border line. A heavier line in a
+    /// lighter grey, so it reads by shape as well as by colour.
+    pub const SCROLL: Style = Style::new().fg(Color::Indexed(248));
     pub const PROMPT: Style = Style::new().fg(Color::Indexed(110));
     pub const INFO: Style = Style::new().fg(Color::Indexed(144));
     pub const HEADER: Style = Style::new().fg(Color::Indexed(109));
@@ -2577,6 +2653,102 @@ mod tests {
         assert_eq!(scroll_window(30, 2, 5, height), 0);
         // No room to draw anything is not a panic.
         assert_eq!(scroll_window(7, 3, count, 0), 0);
+    }
+
+    #[test]
+    fn the_thumb_touches_an_end_only_when_the_list_does() {
+        assert_eq!(scroll_thumb(0, 10, 10), None);
+        assert_eq!(scroll_thumb(0, 40, 0), None);
+        for height in [2, 3, 7, 10] {
+            for count in height + 1..=120 {
+                let last = count - height;
+                let mut previous = 0;
+                for first in 0..=last {
+                    let (start, len) = scroll_thumb(first, count, height).unwrap();
+                    let at = format!("{first}/{count} in {height}");
+                    assert!(len >= 1 && start + len <= height, "{at}");
+                    assert!(start >= previous, "thumb moved back at {at}");
+                    previous = start;
+                    if height - len >= 2 {
+                        assert_eq!(start == 0, first == 0, "{at}");
+                        assert_eq!(start + len == height, first == last, "{at}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_list_longer_than_the_screen_shows_where_the_window_is() {
+        use ratatui::backend::TestBackend;
+        let root = crate::testing::temp_dir().join(format!("tadoru-thumb-{}", std::process::id()));
+        for i in 0..40 {
+            std::fs::create_dir_all(root.join(format!("folder{i:02}"))).unwrap();
+        }
+        // Beside the long list, not in it: dirs searches the whole tree.
+        let small =
+            crate::testing::temp_dir().join(format!("tadoru-thumb-small-{}", std::process::id()));
+        for i in 0..3 {
+            std::fs::create_dir_all(small.join(format!("inner{i}"))).unwrap();
+        }
+        // Where the thumb was drawn, as (column, row).
+        let thumb = |picker: &mut Picker| {
+            let mut terminal = Terminal::new(TestBackend::new(90, 12)).unwrap();
+            terminal
+                .draw(|frame| picker.render(frame.area(), frame))
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            let mut cells = Vec::new();
+            for y in 0..12 {
+                for x in 0..90 {
+                    if buffer[(x, y)].symbol() == "┃" {
+                        cells.push((x, y));
+                    }
+                }
+            }
+            cells
+        };
+        let scanned = |picker: &mut Picker| {
+            picker.source().finish_scan();
+            while picker.source().matcher.tick(TICK_MS).running {}
+        };
+        // The rows sit below the prompt, the counts and the path, and above
+        // the bottom border.
+        let (top, bottom) = (4, 10);
+
+        let mut dirs = test_picker(root.clone(), Mode::Dirs);
+        scanned(&mut dirs);
+        let mut browse = test_picker(root.clone(), Mode::Browse);
+        for (name, picker) in [("dirs", &mut dirs), ("browse", &mut browse)] {
+            let cells = thumb(picker);
+            assert!(!cells.is_empty(), "{name}: no thumb");
+            assert!(
+                cells.iter().all(|&(x, _)| x == cells[0].0),
+                "{name}: {cells:?}"
+            );
+            assert!(cells.iter().any(|&(_, y)| y == top), "{name}: {cells:?}");
+            assert!(cells.iter().all(|&(_, y)| y < bottom), "{name}: {cells:?}");
+
+            // At the last row the thumb reaches the bottom and leaves the top.
+            if name == "dirs" {
+                picker.source().selected = 39;
+            } else {
+                picker.browser().selected = 39;
+            }
+            let cells = thumb(picker);
+            assert!(cells.iter().any(|&(_, y)| y == bottom), "{name}: {cells:?}");
+            assert!(cells.iter().all(|&(_, y)| y > top), "{name}: {cells:?}");
+        }
+
+        // A list that fits has nothing hidden to point at.
+        let mut dirs = test_picker(small.clone(), Mode::Dirs);
+        scanned(&mut dirs);
+        assert!(thumb(&mut dirs).is_empty());
+        let mut browse = test_picker(small.clone(), Mode::Browse);
+        assert!(thumb(&mut browse).is_empty());
+
+        crate::testing::remove_tree(&root);
+        crate::testing::remove_tree(&small);
     }
 
     #[test]
