@@ -107,12 +107,39 @@ fn check(output: Output) {
     );
 }
 
+/// The path of tadoru as `init` prints it.
+///
+/// `init` names the running executable, which Windows reports with
+/// backslashes whatever cargo was given, so a target directory written with
+/// forward slashes still gives the text found in the setup code.
+fn printed_exe() -> String {
+    let exe = env!("CARGO_BIN_EXE_tadoru");
+    if cfg!(windows) {
+        exe.replace('/', "\\")
+    } else {
+        exe.to_string()
+    }
+}
+
+/// Points the setup code at the fixture command instead of tadoru.
+///
+/// A replacement that finds nothing leaves the real picker in the code, and
+/// the test then waits on a screen nobody can answer, so a miss fails here.
+fn use_fixture(code: &str, real: &str, fixture: &str) -> String {
+    assert!(
+        code.contains(real),
+        "{real} is not in the setup code:\n{code}"
+    );
+    code.replace(real, fixture)
+}
+
 #[test]
 fn powershell_scripts_and_functions_preserve_shell_state() {
     let fixture = Fixture::new();
     fixture.init("powershell", true);
-    let functions = fixture.init("powershell", false).replace(
-        &env!("CARGO_BIN_EXE_tadoru").replace('\'', "''"),
+    let functions = use_fixture(
+        &fixture.init("powershell", false),
+        &printed_exe().replace('\'', "''"),
         &fixture.exe.to_string_lossy().replace('\'', "''"),
     );
     let script = format!(
@@ -242,8 +269,9 @@ exit /b 0
 #[test]
 fn bash_functions_preserve_shell_state() {
     let fixture = Fixture::new();
-    let functions = fixture.init("bash", false).replace(
-        &env!("CARGO_BIN_EXE_tadoru").replace('\\', "/"),
+    let functions = use_fixture(
+        &fixture.init("bash", false),
+        &printed_exe().replace('\\', "/"),
         &fixture.exe.to_string_lossy().replace('\\', "/"),
     );
     let script = format!(
@@ -326,8 +354,9 @@ fn bash_defines_the_names_it_was_given_and_nothing_else() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let functions = String::from_utf8(output.stdout).unwrap().replace(
-        &env!("CARGO_BIN_EXE_tadoru").replace('\\', "/"),
+    let functions = use_fixture(
+        &String::from_utf8(output.stdout).unwrap(),
+        &printed_exe().replace('\\', "/"),
         &fixture.exe.to_string_lossy().replace('\\', "/"),
     );
     // The renamed pickers answer to the new names and keep the - shortcut,
