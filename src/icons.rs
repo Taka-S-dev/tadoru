@@ -78,7 +78,7 @@ mod tests {
 
     #[test]
     fn office_documents_use_distinct_icons_with_case_insensitive_extensions() {
-        let sheet = prefix("特性要因図.xlsx", false, true);
+        let sheet = prefix("集計表.xlsx", false, true);
         assert_eq!(prefix("jitsurei_6.XLSM", false, true), sheet);
         assert_eq!(prefix("test.csv", false, true), sheet);
         let word = prefix("report.docx", false, true);
