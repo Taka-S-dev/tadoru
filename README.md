@@ -1,122 +1,128 @@
 # tadoru
 
-**tadoru**（辿る）は、cmd.exe / PowerShell / bash で同じ操作感のディレクトリ移動ツール。
-数文字打って Enter で目的地へ辿り着き、階層を 1 段ずつ辿ることもできる。Rust + ratatui。
+[日本語](README.ja.md)
 
-- フォルダ名を覚えている: `c openssl`
-- ファイル名だけ分かる: `cf Cargo.toml` で、そのファイルの親フォルダへ移動
-- 名前を知らず中を見たい: `c` を開き、Tab で browse に切り替える
+**tadoru** is a directory jumper that works the same way in cmd.exe, PowerShell and bash.
+Type a few letters and press Enter to cd there, or walk the tree one level at a time.
+The name is Japanese (辿る) for following a path to where it leads. Written in Rust with ratatui.
 
-`c`・`cf`・browse・favorites は本体だけで動く。
-履歴を使う `z`・`zi`・recent には `zoxide` が要る（無い場合は画面で案内する）。
+- You remember the folder's name: `c openssl`
+- You only know a file's name: `cf Cargo.toml` takes you to the folder holding it
+- You want to look around: open `c` and press Tab to browse
 
-配布しているのは Windows と Linux の x86_64 版。[リリース](../../releases)から取得する。
-macOS 向けのコードはあるが、ビルドも動作確認もしていない。
+`c`, `cf`, browse and favorites need nothing else.
+`z`, `zi` and recent read the history kept by `zoxide` (if it is missing, the screen says how to get it).
 
-## fd + fzf との関係
+Builds for Windows and Linux on x86_64 are on the [releases](../../releases) page.
+There is code for macOS, but it has not been built or tried there.
 
-もとは PowerShell で使っていた fd + fzf の関数（`c` / `cf`）。作り直した理由は 2 つある。
-1 つは cmd.exe でも同じ操作で使いたかったこと。もう 1 つは、上の階層から探し直すたびに
-抜けて `cd ..` し、開き直すのが面倒だったこと。
-見た目は fzf の既定の配色と並びに合わせている。fd・fzf のコードは使っていない。
+## How it relates to fd and fzf
 
-fd + fzf は、一覧を絞り込んで選んだパスを出力するところまでを受け持つ。cd はシェル側でつなぐ。
-PowerShell か bash だけを使い、fd と fzf を入れられる環境なら、それで足りることが多い。
-tadoru が役に立つのは次のような場合。
+tadoru started as two PowerShell functions, `c` and `cf`, built on fd and fzf. It was rewritten
+for two reasons: to have the same commands in cmd.exe, and to stop leaving the list, running
+`cd ..` and opening it again every time a search had to start one level higher.
+It follows fzf's default colours and layout, but uses no code from fd or fzf.
 
-- cmd.exe でも同じ操作で cd したい。バッチでつなぐと `^` `&` `|` や引用符で壊れやすい
-- 探す範囲を画面の中で動かしたい。Left で起点を 1 段広げ、3 列表示で辿った先はそのまま起点になる。
-  変わった起点は Ctrl+← で戻せる
-- 実行ファイル 1 つで済ませたい。fd と fzf を別に入れなくてよい
-- お気に入りやアクションメニューも同じ画面で使いたい
+fd and fzf narrow a list down and print the path you chose; the shell does the cd.
+If you only use PowerShell or bash and can install fd and fzf, that is often all you need.
+tadoru helps when:
 
-## 導入
+- You want the same cd in cmd.exe. Joining fd and fzf in a batch file tends to break on
+  `^`, `&`, `|` and quotes
+- You want to move the search without leaving it. Left widens it by one level, and a folder
+  reached in the three-column view becomes where the search starts. Ctrl+← undoes the move
+- You want a single executable, without installing fd and fzf separately
+- You want favorites and an action menu on the same screen
 
-| コマンド | 何をするか |
+## Install
+
+| Command | What it does |
 |---|---|
-| `tadoru setup` | PowerShell / bash の起動ファイルに設定を 1 ブロック追記する |
-| `tadoru init cmd --out` | `c.cmd` `cf.cmd` `z.cmd` `zi.cmd` を出力する |
-| `tadoru init powershell --out` | `c.ps1` `cf.ps1` `z.ps1` `zi.ps1` を出力する |
+| `tadoru setup` | Adds one block to your PowerShell or bash startup file |
+| `tadoru init cmd --out` | Writes `c.cmd` `cf.cmd` `z.cmd` `zi.cmd` |
+| `tadoru init powershell --out` | Writes `c.ps1` `cf.ps1` `z.ps1` `zi.ps1` |
 
-出力先は `tadoru.exe` と同じフォルダ。`--out` の後ろにフォルダを書けば変えられる。
+The files are written next to `tadoru.exe`. Put a folder after `--out` to write them elsewhere.
 
-PowerShell と bash は `setup` だけでよい。zsh は `~/.zshrc` に手で書く（[導入の詳細](docs/guide/setup.md#手動で設定する)）。
-cmd.exe には起動時に読むファイルが無いので
-`init cmd --out` を使い、出力したフォルダを PATH に入れる。
-`.ps1` はプロファイルを触りたくない場合の代替で、zoxide を入れていると
-`z` と `zi` を置き換えられない。
+For PowerShell and bash, `setup` is all you need. For zsh, add the lines to `~/.zshrc` by hand
+(see the [setup guide](docs/guide/setup.md#setting-it-up-by-hand)). cmd.exe has no startup file, so use
+`init cmd --out` and add the folder it wrote to PATH. The `.ps1` scripts are for when you would
+rather not touch your profile; with zoxide installed, they cannot replace `z` and `zi`.
 
-`setup` は書き込む内容と対象ファイルを表示してから確認を求める。`--yes` で省ける。
-シェルは環境から判定する。追記するのは目印で囲んだ 1 ブロックだけで、再実行しても増えない。
-やめるときは目印から目印までを消す。
+`setup` shows what it will write and to which file, then asks before writing. `--yes` skips the
+question. It tells the shell from the environment. It adds a single block between two markers,
+and running it again does not add another. To remove it, delete everything from one marker to
+the other.
 
-名前は既定で `c` `cf` `z` `zi`。同じ名前のコマンドがすでに PATH にあれば、`setup` と
-`init --out` がその場所を表示する。`--cmd j` を付けると `j` と `jf` になり、`--no-z` を付けると
-zoxide の `z` と `zi` には手を付けない。詳しくは[導入の詳細](docs/guide/setup.md#コマンド名を変える)。
+The names are `c` `cf` `z` `zi` by default. If a command with the same name is already on PATH,
+`setup` and `init --out` show where it is. `--cmd j` gives you `j` and `jf` instead, and `--no-z`
+leaves zoxide's own `z` and `zi` alone. See the [setup guide](docs/guide/setup.md#changing-the-command-names).
 
-リリースの zip には exe と上の 8 本が入っているので、展開して PATH に入れるだけでよい。
-リポジトリから使う場合は先にビルドする。[開発](#開発)を参照。
+The release zip holds the exe and all eight scripts above, so unzipping it into a folder on PATH
+is enough. To run from the repository, build it first: see [Development](#development).
 
-手作業で設定したい場合や、`init` が出す内容そのものは
-[導入の詳細](docs/guide/setup.md)を参照。
+For setting it up by hand, or to see exactly what `init` writes, read the
+[setup guide](docs/guide/setup.md).
 
-## コマンド
+## Commands
 
-| コマンド | 動作 |
+| Command | What it does |
 |---|---|
-| `c [query]` | カレント配下のディレクトリを選んで cd |
-| `cf [query]` | ファイルを選んでその親ディレクトリに cd |
-| `z <keywords>` | zoxide の履歴から一致する 1 件に cd（引数なしでホーム） |
-| `zi [query]` | zoxide の履歴を一覧から選んで cd |
-| `c -` | 直前に tadoru で移動する前に居たフォルダへ戻る（繰り返すと往復） |
+| `c [query]` | Pick a directory under the current one and cd into it |
+| `cf [query]` | Pick a file and cd into the folder holding it |
+| `z <keywords>` | cd to the best match in the zoxide history (home, with no arguments) |
+| `zi [query]` | Pick a directory from the zoxide history and cd into it |
+| `c -` | Go back to where you were before the last move made with tadoru (again to return) |
 
-## 画面
+## The screen
 
-Tab で検索と browse を行き来する。browse から戻る先は直前に使っていた検索で、
-`cf` で開いたなら files と browse の往復になる。検索の種類は Shift-Tab で
-dirs → files → recent → favorites と切り替える。上枠のモード名はクリックでも切り替わる。
-どのモードでも、文字を打てば絞り込み、Enter でそこへ cd。
-Esc は絞り込みを消し、空の状態でもう一度押すと終了する。Ctrl-C はいつでも終了する。
+Tab goes between the search and browse. Browse goes back to the search used last, so after
+`cf` Tab goes between files and browse. Shift-Tab changes the kind of search:
+dirs → files → recent → favorites. The mode names on the top border also switch with a click.
+In every mode, typing filters the list and Enter cds there.
+Esc clears the filter, and pressed again on an empty filter it quits. Ctrl-C always quits.
 
-| キー | 動作 |
+| Key | What it does |
 |---|---|
-| Tab | 検索と browse を行き来する。戻る先は直前に使っていた検索 |
-| Shift-Tab | 検索の種類を切り替える。browse では検索に戻る |
-| Ctrl-B | 選択中のフォルダをお気に入りに登録・解除 |
-| Ctrl-P | 選択中の項目に対するアクションメニュー |
-| Ctrl-A | 走査が上限で止まったとき、上限を外して集め直す |
-| F5 | 一覧とプレビューを更新 |
-| Left | 検索範囲を 1 段広げる。browse では階層を上がる |
-| Right | browse で階層を下る |
-| Ctrl+← / Ctrl+→ | 訪問履歴を戻る・進む。browse は移動先、検索は起点。Alt+← / Alt+→ でも同じ |
+| Tab | Go between the search and browse, back to the search used last |
+| Shift-Tab | Change to the next kind of search. In browse, go back to the search |
+| Ctrl-B | Pin or unpin the selected folder as a favorite |
+| Ctrl-P | Open the action menu for the selected item |
+| Ctrl-A | When a scan stopped at its limit, collect the rest |
+| F5 | Refresh the list and the preview |
+| Left | Widen the search by one level. In browse, go up a level |
+| Right | In browse, go down a level |
+| Ctrl+← / Ctrl+→ | Step back or forward through the places visited: folders in browse, starting points in a search. Alt+← / Alt+→ do the same |
 
-上枠の下のパスは、その検索が対象にしているフォルダ。階層名をクリックすると
-そこを起点に探し直す。入力中の絞り込みはそのまま残る。
+The path under the top border is the folder the search covers. Click a step of it to search from
+there instead; what you typed stays.
 
-browse で移動してから Tab で戻ると、移動先が新しい起点になる。変わったときは
-画面下部に表示するので、意図しない場所になったら Ctrl+← で戻せる。
+Moving somewhere in browse and pressing Tab makes that folder where the search starts. The bottom
+of the screen says so when it happens, and Ctrl+← puts it back if that was not what you meant.
 
-browse は Miller columns。左が親、中央が今の階層、右が選択先の中身。
-Finder の列表示や ranger、yazi に近い並べ方で、cd 専用なのでファイル操作は持たない。
-上枠のモード名と、その下のパスはクリックできる。パスは階層名を押すとそこへ移動する。
+Browse shows Miller columns: the parent on the left, the current folder in the middle, and what
+the selection holds on the right. It is laid out like Finder's column view, ranger and yazi, but it
+is only for getting somewhere: it does not copy, delete or rename files. The mode names on the top
+border and the path under them can be clicked; clicking a step of the path goes there.
 
-くわしくは[画面と操作](docs/guide/screen.md)と[アクションメニュー](docs/guide/actions.md)。
+More in [the screen and keys](docs/guide/screen.md) and [the action menu](docs/guide/actions.md).
 
-## 設定
+## Configuration
 
-設定ファイルは任意で、無ければ既定値で動く。自動では作らない。
+Configuration is optional; without it, the defaults apply. tadoru does not create the files itself.
 
-| コマンド | 何をするか |
+| Command | What it does |
 |---|---|
-| `tadoru config init` | `config.toml` の雛形を出力する |
-| `tadoru actions init` | `actions.json` の雛形を出力する |
-| `tadoru actions check` | 書いた `actions.json` を検証する |
+| `tadoru config init` | Writes a template `config.toml` |
+| `tadoru actions init` | Writes a template `actions.json` |
+| `tadoru actions check` | Checks an `actions.json` you have written |
 
-設定の置き場所は Windows では `%APPDATA%\tadoru`。tadoru はここから読み、
-上の `init` はここへ書く。既存のファイルは上書きしない。
+On Windows the files live in `%APPDATA%\tadoru`. tadoru reads them from there, and the `init`
+commands above write there. An existing file is never overwritten.
 
-`tadoru.exe` と同じ場所に `config` という名前のフォルダを**自分で作っておく**と、
-読む先も書く先もそちらに移る。フォルダごとコピーすれば設定を持ち運べる。無ければ作らない。
+If you **create** a folder named `config` next to `tadoru.exe`, tadoru reads from and writes to
+that folder instead, so copying the folder takes your settings with you. tadoru never creates
+this folder itself.
 
 ```text
 tadoru.exe
@@ -125,20 +131,21 @@ config/actions.json
 config/favorites.toml
 ```
 
-`config.toml` はアイコン表示、マウスの有効・無効、一時コピーの上限、走査から外すフォルダ、
-1 回の走査で集める件数の上限を指定する。各項目の意味は[画面と操作](docs/guide/screen.md)。
+`config.toml` sets icons, whether the mouse is used, the size limit for temporary copies,
+folders to leave out of scans, and the most items one scan collects.
+[The screen and keys](docs/guide/screen.md) explains each setting.
 
-`actions.json` は Ctrl-P のアクションメニューに項目を足す。1 文字のキーも割り当てられる。
-書式は[アクションメニュー](docs/guide/actions.md)を参照。
+`actions.json` adds items to the Ctrl-P action menu, and each can have a one-letter key.
+See [the action menu](docs/guide/actions.md) for the format.
 
-## 開発
+## Development
 
 ```text
 cargo build --release
 ```
 
-`target/release/tadoru.exe` ができる。Rust は 2024 edition に対応した安定版が要る。
-そのまま `target/release/tadoru.exe setup` のように実行して導入できる。
+This builds `target/release/tadoru.exe`. It needs a stable Rust that supports the 2024 edition.
+You can set it up straight from there, for example with `target/release/tadoru.exe setup`.
 
 ```text
 cargo fmt --check
@@ -146,26 +153,27 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-統合テストは実際のシェルで移動・終了コード・環境の復元を検証する。
-PowerShell 7（`pwsh`）と bash が要る。Windows では Git Bash を使う
-（標準以外の場所にある場合は `TADORU_TEST_BASH` に実行ファイルのパスを設定）。
+The integration tests run real shells and check the directory changes, the exit codes and that
+the environment is restored. They need PowerShell 7 (`pwsh`) and bash. On Windows they use
+Git Bash; if it is not in the usual place, set `TADORU_TEST_BASH` to its path.
 
-性能測定は `TADORU_BENCH_ROOT` に対象フォルダを指定して再実行できる。
+To repeat the performance measurements, set `TADORU_BENCH_ROOT` to the folder to measure.
 
 ```text
 cargo test --release --bin tadoru benchmark_local_tree -- --ignored --nocapture
 cargo test --release --bin tadoru benchmark_mode_switch -- --ignored --nocapture
 ```
 
-手元の Windows x86_64 / release ビルドで `C:\` を対象に既定の上限の 20 万件まで集めると、
-走査から並び順の確定まで files は 0.3 秒前後、dirs は 2〜3 秒だった。
-dirs はフォルダだけを 20 万件集めるため、ドライブのより広い範囲を歩く。
-`src` への絞り込みの更新は 10 ms 前後。実行ごとに動くので、
-狭い範囲を主張できる数字ではない。走査はバックグラウンドで進み、一覧は途中から使える。
-モード切替の測定は、描画スレッドを止める処理が戻っていないかを見るためのもの。
-いずれも内部処理の測定で、プロセス起動から実端末への初回表示や入力遅延を保証する値ではない。
-画面は変化があったときだけ描き直すので、開いたまま放置しても CPU を使い続けない。
+On a Windows x86_64 release build, collecting up to the default limit of 200,000 items from `C:\`
+took about 0.3 seconds from the start of the scan to the final sort order in files, and 2 to 3
+seconds in dirs. dirs collects 200,000 folders and nothing else, so it walks a wider part of the
+drive. Updating the filter to `src` took around 10 ms. The numbers vary between runs and are not
+precise claims. The scan runs in the background, and the list can be used before it finishes.
+The mode switch measurement is there to catch slow work coming back onto the drawing thread.
+All of these measure internal work, not process startup, the first frame in a real terminal, or
+input latency. The screen is only redrawn when something changes, so leaving it open does not
+keep a CPU busy.
 
-## ライセンス
+## License
 
-MIT。詳細は [LICENSE](LICENSE)。
+MIT. See [LICENSE](LICENSE).

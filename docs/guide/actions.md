@@ -1,74 +1,83 @@
-# アクションメニュー
+# The action menu
 
-選択中のファイルやフォルダを、別のアプリやスクリプトに渡すための画面。
-tadoru 自体はコピー・削除・名前変更を持たない。渡すところまでが役目。
+A screen for handing the selected file or folder to another application or script.
+tadoru itself does not copy, delete or rename; handing things over is as far as it goes.
 
-**Ctrl-P** で、選択中のファイル・フォルダに対する操作を開く。
-メニューを開いた時点の対象に対して実行する。Esc / Ctrl-P で元の画面に戻る。
+**Ctrl-P** opens the actions for the selected file or folder. They run on what was selected when the
+menu opened. Esc or Ctrl-P goes back.
 
-開いた直後はキー待ちで、行の左に出ている文字を押すとその操作を実行する。
-修飾キーは要らない。上下キーで選んで Enter、クリックでも実行できる。
+When the menu opens it waits for a key: press the letter at the left of a row to run that action, with
+no modifier. You can also pick with the arrow keys and press Enter, or click.
 
-| キー | 操作 |
+| Key | Action |
 |---|---|
-| F | ファイルマネージャで開く |
-| V | VS Code で開く |
-| C | パスをコピー |
-| D | 関連付けアプリで開く |
-| O | 一時コピーを開く |
+| f | Open in file manager |
+| v | Open in VS Code |
+| c | Copy path |
+| d | Open with default application |
+| o | Open temporary copy (TEMP_) |
 
-名前が Open で始まる操作が 4 つあるので、`o` は他に入口のない一時コピーに割り当てている。
-関連付けアプリで開く操作は画面から Ctrl-O でも実行できる。
+Four of these start with Open, so `o` goes to the temporary copy, which has no other way in.
+Outside the menu, Ctrl-E opens the selection with its default application and Ctrl-O shows it in the
+file manager.
 
-一覧の下に区切り線を挟んで **T 一時コピーのフォルダを開く** が出る。
-これだけは選択中の対象に対する操作ではなく、tadoru が作った一時コピーの置き場所を開く。
-一覧に混ぜると行に対する操作に見えるので離してある。絞り込んでも消えない。
+Below the list, after a divider, is **t Open temporary copies folder**. It is the one item that does
+not act on the selection: it opens the folder where tadoru keeps its temporary copies. Mixed into the
+list it would look like an action on the row, so it sits apart. Filtering does not hide it.
 
-**Tab** または **/** で入力欄に移り、文字を打って絞り込める。
-操作が多いときや名前しか覚えていないときに使う。Tab でキー待ちに戻り、
-このとき打った文字は消える。次に押すキーが一覧全体に効くようにするため。
-入力中は行の左が `alt+f` の表示に変わる。Alt を押しながらなら、
-入力中でも、絞り込みで隠れている操作でも実行できる。
+**Tab** or **/** moves to the input box, where typing filters the actions. Use it when there are many
+of them, or when you only remember a name. Tab goes back to waiting for a key and clears what you
+typed, so the next key applies to the whole list again. While you type, the left of each row shows
+`alt+f` and so on: holding Alt runs an action while typing, even one the filter hides.
 
-設定なしで、ファイルマネージャで開く・VS Code で開く・パスのコピーが使える。
-ファイルでは関連付けアプリで開く操作も表示する。VS Code は `code` が PATH に必要。
-ファイルの **Open temporary copy (TEMP_)** は、OS の一時フォルダ内に毎回専用フォルダを作り、
-`TEMP_元のファイル名` にコピーして既定のアプリで開く。コピー先は画面下部に表示する。
-保存先は OS の一時フォルダ内の `tadoru-copies`。区切り線の下の項目で開き、
-不要なコピーを確認して手動削除できる。ファイルを選んでいなくても使える。
-一時コピーの上限は既定で **100 MiB**。`config.toml` の `temp_copy_max_mib = 100` で変更でき、
-`0` で一時コピーを無効にする。実行時に設定を読み直す。
-開始前にサイズを確認し、コピー中にファイルが大きくなっても上限を超えて書き込まない。
-上限超過・コピー失敗時は途中のコピーを削除し、アプリは起動しない。フォルダのコピーは対象外。
-原本や以前のコピーは上書きしない。tadoru 終了時も自動削除せず、原本への書き戻しも行わない。
-残したい編集結果はアプリ側で「名前を付けて保存」する。一時フォルダは OS に削除される場合がある。
-単一ファイルのコピーなので、相対リンクや関連ファイルに依存する文書は動作が変わる場合がある。
-原本を他のアプリが更新している最中のコピーは、そのアプリで保存・更新を止めてから実行する。
-Linux のパスのクリップボードコピーには Wayland で `wl-copy`、それ以外では `xclip` が必要。
+## Built-in actions
 
-独自のメニューを作るには次を実行する。
+Without any configuration you get Open in file manager, Open in VS Code and Copy path; for a file,
+Open with default application is shown as well. Open in VS Code needs `code` on PATH.
+
+For a file, **Open temporary copy (TEMP_)** creates a new folder inside the system temporary folder
+every time, copies the file there as `TEMP_<original name>`, and opens the copy with its default
+application. The bottom of the screen shows where the copy went. Copies are kept in `tadoru-copies`
+inside the system temporary folder. The item below the divider opens that folder, so you can look
+through old copies and delete them by hand; it works even when no file is selected.
+
+A copy is limited to **100 MiB** by default. Change it with `temp_copy_max_mib = 100` in
+`config.toml`; `0` turns temporary copies off. The setting is read again each time. The size is
+checked before copying, and nothing past the limit is written even if the file grows during the copy.
+If the limit is exceeded or the copy fails, the partial copy is deleted and no application starts.
+Folders cannot be copied.
+
+The original and earlier copies are never overwritten. Copies are not deleted when tadoru exits, and
+nothing is written back to the original, so to keep your edits, use Save As in the application. The
+system may delete its temporary folder. Only the one file is copied, so documents that depend on
+relative links or on files beside them may behave differently. If another application is saving to
+the original, stop it before making the copy.
+
+On Linux, copying a path to the clipboard needs `wl-copy` on Wayland, and `xclip` otherwise.
+
+## Adding your own
+
+To build your own menu, run:
 
 ```text
 tadoru actions init
 tadoru actions check
 ```
 
-`init` は雛形を書き出し、`check` は書いた内容を検証する。既存の設定は上書きしない。
-雛形に入っているのは組み込みにない操作だけなので、同じものが二重に並ぶことはない。
-雛形は exe に埋め込んであるので、配布物に設定が入っていなくても書き出せる。
-設定がまだ無い間は、メニューにこのコマンドを案内する行が出る。
-同じ雛形を [examples/config/actions.json](../../examples/config/actions.json) にも置いている。
-ポータブル版では `examples/config` を `tadoru.exe` と同じフォルダに `config` という名前で
-コピーすると使える。
+`init` writes a template, and `check` checks what you have written. An existing file is never
+overwritten. The template only holds actions that are not built in, so nothing appears twice. It is
+built into the exe, so it can be written even when the download has no configuration in it. Until
+you have one, the menu shows a line pointing to this command. The same template is in
+[examples/config/actions.json](../../examples/config/actions.json). For the portable setup, copy
+`examples/config` next to `tadoru.exe` and name the copy `config`.
 
-設定ファイルは `config.toml` と同じフォルダの **`actions.json`**。
-置き場所の決まり方は[画面と操作](screen.md)にある。`tadoru.exe` と同じフォルダに
-`config` フォルダを作れば、
-`config.toml`・`favorites.toml`・`actions.json` をまとめて持ち運べる。
-自作スクリプトは `config/scripts` に置き、`program` を `scripts/my-tool.bat` のような
-相対パスにすると、PC を移しても書き換えずに済む。
-メニューを開くたびに読み直す。JSON の誤りは画面に表示し、既定の操作と移動機能は使い続けられる。
-移動先のフォルダに置かれた設定を読み込んだり実行したりすることはない。
+The file is **`actions.json`**, in the same folder as `config.toml`;
+[the screen and keys](screen.md#configuration-files) explains how that folder is found. With a
+`config` folder next to `tadoru.exe`, `config.toml`, `favorites.toml` and `actions.json` travel
+together. Put your own scripts in `config/scripts` and give `program` a relative path such as
+`scripts/my-tool.bat`, and nothing needs changing on another PC. The file is read again every time
+the menu opens. Mistakes in the JSON are shown on screen, and the built-in actions and moving around
+keep working. Configuration found in the folders you move to is never read or run.
 
 ```json
 {
@@ -84,7 +93,7 @@ tadoru actions check
       "key": "s"
     },
     {
-      "name": "自作スクリプト",
+      "name": "My script",
       "program": "scripts/task.ps1",
       "args": ["{path}"],
       "target": "directory",
@@ -94,37 +103,40 @@ tadoru actions check
 }
 ```
 
-| 設定 | 意味 |
+| Field | Meaning |
 |---|---|
-| `version` | 設定形式のバージョン。現在は `1` を指定 |
-| `name` | メニューに表示する名前。必須 |
-| `program` | 実行ファイルまたはスクリプト。引数は含めない |
-| `args` | 引数の配列。`{path}` は対象、`{dir}` は対象のフォルダ（ファイルなら親）、`{config}` は設定フォルダ |
-| `target` | `any`・`file`・`directory`。既定は `any` |
-| `run` | `terminal` は画面を一時的に閉じ、結果と終了コードを確認して Enter / Esc で戻る。`detach` は出力を表示せずバックグラウンド起動。既定は `terminal` |
-| `cwd` | 作業フォルダ。既定は `{dir}`。相対パスは設定フォルダ基準 |
-| `key` | キー待ちで押す 1 文字。省略すると割り当てない |
-| `include_defaults` | `false` にすると自作アクションだけを表示。既定は `true` |
+| `version` | The format version. Currently `1` |
+| `name` | The name shown in the menu. Required |
+| `program` | The executable or script, without arguments |
+| `args` | The arguments, as an array. `{path}` is the target, `{dir}` the target's folder (the parent, for a file), and `{config}` the configuration folder |
+| `target` | `any`, `file` or `directory`. Default `any` |
+| `run` | `terminal` closes the screen for a moment, shows the output and exit code, and returns on Enter or Esc. `detach` starts it in the background without showing output. Default `terminal` |
+| `cwd` | The working folder. Default `{dir}`. A relative path is taken from the configuration folder |
+| `key` | One character to press while the menu waits for a key. Leave it out for no key |
+| `include_defaults` | `false` shows only your own actions. Default `true` |
 
-`key` は英数字 1 文字で、`/` は入力欄に移るため指定できない。
-上の表の組み込みと同じ文字も指定できる。その場合は自作の操作が優先し、
-組み込み側のキー表示は消える。1 つのキーが 2 つの操作を実行することはない。
-同じキーを自作の操作どうしで重ねた場合は `tadoru actions check` が名前を挙げて止める。
+`key` must be a single letter or digit. `/` cannot be used, because it moves to the input box. A key
+used by a built-in action in the table above is allowed: your action wins, and the built-in one stops
+showing its key. One key never runs two actions. If two of your own actions share a key,
+`tadoru actions check` names them and stops.
 
-追加するときは `actions` 配列内の `{ ... }` を1つコピーし、名前・プログラム・引数を変更する。
-項目の間はカンマで区切り、最後の項目の後にはカンマを付けない。JSON にはコメントを書けない。
-文字列はダブルクォートで囲む。Windows パスは `C:/tools/task.bat` または
-`C:\\tools\\task.bat` と書く。`program` と `args` は分け、引数は1個ずつ配列に入れる。
-保存後は `tadoru actions check` で確認し、Ctrl-P でメニューを開き直すと反映される。
+To add an action, copy one `{ ... }` inside the `actions` array and change the name, program and
+arguments. Separate items with commas, with no comma after the last one. JSON has no comments.
+Strings go in double quotes. Write Windows paths as `C:/tools/task.bat` or `C:\\tools\\task.bat`.
+Keep `program` and `args` apart, with one argument per array element. After saving, run
+`tadoru actions check`, then open the menu again with Ctrl-P to see the change.
 
-`scripts/task.ps1` などの相対 `program` は設定フォルダ基準。
-`.ps1` は PowerShell 7 の `pwsh -NoProfile -File` で実行する。
-`program: "pwsh"` と `args: ["-NoProfile", "-File", "scripts/task.ps1", "{path}"]` でも指定できる。
-Windows の `.cmd` / `.bat` も `program` に直接指定できる。
-通常の `args` の相対パスは自動変換しないため、設定側のファイルを渡すときは `{config}/scripts/...` を使う
-（PowerShell の `-File` 直後は設定フォルダ基準）。波括弧を文字として渡すときは `{{`・`}}` と書く。
+A relative `program` such as `scripts/task.ps1` is taken from the configuration folder. `.ps1` scripts
+run with PowerShell 7 as `pwsh -NoProfile -File`. You can also write `"program": "pwsh"` with
+`"args": ["-NoProfile", "-File", "scripts/task.ps1", "{path}"]`. Windows `.cmd` and `.bat` files can
+be given directly as `program`. Relative paths in ordinary `args` are not converted, so pass files
+from the configuration folder as `{config}/scripts/...`; the one exception is the argument right
+after PowerShell's `-File`, which is taken from the configuration folder. To pass a literal brace,
+write `{{` or `}}`.
 
-対象パスは環境変数 `TADORU_TARGET`、対象フォルダは `TADORU_DIR`、設定フォルダは `TADORU_CONFIG` でも参照できる。
-引数を1本のシェルコマンド文字列に結合しない。`cmd /c` や `pwsh -Command` のコードへ対象パスを埋め込む代わりに、
-スクリプトファイルと引数、またはこれらの環境変数を使う。
-`detach` は起動できたかまでを確認するので、実行結果やエラーを読みたい操作には `terminal` を使う。
+The target path is also in the environment variable `TADORU_TARGET`, the target's folder in
+`TADORU_DIR`, and the configuration folder in `TADORU_CONFIG`. Arguments are never joined into one
+shell command string. Rather than putting the target path into code for `cmd /c` or
+`pwsh -Command`, use a script file with arguments, or these environment variables. `detach` only
+confirms that the program started, so use `terminal` for actions whose output or errors you want to
+read.

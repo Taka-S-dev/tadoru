@@ -1,122 +1,131 @@
-# 導入の詳細
+# Setup in detail
 
-`tadoru setup` で足りる場合は [README](../../README.md) だけ読めばよい。
-ここは手作業で設定したい場合と、うまく動かない場合の資料。
+If `tadoru setup` does the job, the [README](../../README.md) is all you need.
+This page is for setting things up by hand, and for when something does not work.
 
-## setup が書く内容
+## What setup writes
 
-目印で囲んだ 1 ブロックを、シェルの起動ファイルに追記する。
+`setup` adds one block, between two markers, to the shell's startup file. For PowerShell:
 
 ```text
 # >>> tadoru >>>
 $tadoruEncoding = [Console]::OutputEncoding
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-Invoke-Expression (& C:\path\to\tadoru.exe init powershell | Out-String)
+Invoke-Expression (& 'C:\path\to\tadoru.exe' init powershell | Out-String)
 [Console]::OutputEncoding = $tadoruEncoding
 Remove-Variable tadoruEncoding
 # <<< tadoru <<<
 ```
 
-再実行しても増えない。内容が変わっていれば差し替える。既に同じなら何もしない。
-やめるときは目印から目印までを消す。書き込みは一時ファイルを経由するので、
-途中で中断しても起動ファイルが壊れた状態で残らない。
-既存の起動ファイルが UTF-8 として読めない場合は、上書きせず中止して理由を表示する。
+For bash, the block holds a single line: `eval "$(/path/to/tadoru init bash)"`.
 
-シェルは環境から判定する。明示したいときは `tadoru setup powershell` のように指定する。
+Running it again does not add a second block. A block with different contents is replaced, and
+an identical one is left alone. To remove it, delete everything from one marker to the other.
+The file is written through a temporary file, so an interrupted write cannot leave the startup
+file half written. If the existing startup file cannot be read as UTF-8, `setup` stops without
+writing and says why.
 
-## 文字コードについて
+The shell is worked out from the environment. To name it yourself, use `tadoru setup powershell`,
+for example.
 
-`.ps1` に書き込むときは UTF-8 の BOM を付ける。Windows PowerShell 5.1 は BOM のない
-`.ps1` をシステムのコードページとして読むため、日本語を含むパスが別の文字列になり、
-存在しない実行ファイルを指すようになる。`init powershell --out` が作る `.ps1` も同じ。
+## Character encoding
 
-ブロックの中で `[Console]::OutputEncoding` を切り替えているのも同じ理由。5.1 は外部
-プログラムの出力もコードページで復号するので、`init` が出す初期化コードに含まれる
-実行ファイルのパスが壊れる。PowerShell 7 はどちらも最初から UTF-8 なので、7 では
-この 2 つは何も変えない。
+`.ps1` files are written with a UTF-8 byte order mark. Windows PowerShell 5.1 reads a `.ps1`
+without one in the system code page, so a path containing non-ASCII characters turns into a
+different string and points at an executable that does not exist. The same goes for the `.ps1`
+files that `init powershell --out` writes.
 
-`tadoru setup` が書き込むのは PowerShell 7 のプロファイル
-(`ドキュメント\PowerShell\Microsoft.PowerShell_profile.ps1`)。5.1 を使う場合は
-`ドキュメント\WindowsPowerShell\Microsoft.PowerShell_profile.ps1` に同じブロックを
-自分で書く。保存は BOM 付き UTF-8 にする。
+The block switches `[Console]::OutputEncoding` for the same reason. PowerShell 5.1 also decodes
+what an external program prints using the code page, which would break the executable's path
+inside the code `init` prints. PowerShell 7 uses UTF-8 for both from the start, so on 7 neither
+of these changes anything.
 
-## 手動で設定する
+`tadoru setup` writes to the PowerShell 7 profile
+(`Documents\PowerShell\Microsoft.PowerShell_profile.ps1`). For 5.1, add the same block to
+`Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1` yourself, and save it as UTF-8
+with a byte order mark.
 
-dotfiles をバージョン管理している、共有マシンで設定を書き換えられない、
-zoxide との読み込み順を自分で決めたい。そういう場合は自分で書く。
+## Setting it up by hand
 
-`z` と `zi` は zoxide がエイリアスとして定義する。エイリアスは関数より優先されるため、
-tadoru の行は **zoxide init より後**に置く必要がある。
+Write it yourself when your dotfiles are under version control, when you cannot change the
+startup files on a shared machine, or when you want to decide the load order with zoxide.
 
-| シェル | 書くファイル | 書く内容 |
+zoxide defines `z` and `zi` as aliases, and an alias wins over a function, so the tadoru lines
+have to come **after zoxide init**.
+
+| Shell | File | What to write |
 |---|---|---|
-| PowerShell | `$PROFILE` | 上の「setup が書く内容」の 5 行。BOM 付き UTF-8 で保存する |
-| bash / zsh | `~/.bashrc` `~/.zshrc` | `eval "$(tadoru init bash)"` |
-| cmd.exe | なし | `tadoru init cmd --out`（exe と同じフォルダに書く） |
+| PowerShell | `$PROFILE` | The five lines between the markers in [What setup writes](#what-setup-writes). Save as UTF-8 with a byte order mark |
+| bash / zsh | `~/.bashrc` / `~/.zshrc` | `eval "$(tadoru init bash)"` |
+| cmd.exe | None | `tadoru init cmd --out` (writes the scripts next to the exe) |
 
-`tadoru init <shell>` は初期化コードを標準出力に書くだけで、ファイルには触らない。
-どのファイルに、どの順序で入れるかは利用者が決めることなので、`init` は判断しない。
+`tadoru init <shell>` only prints the setup code; it does not touch any file. Which file it goes
+in, and in what order, is yours to decide, so `init` does not guess.
 
-自分でシムを書く場合は `tadoru pick --mode <mode>` を使う。選ばれたパスを標準出力に
-1 行で書くので、それを `cd` に渡す。標準出力はこの 1 行専用で、案内や警告は標準エラーに出る。
+To write your own wrapper, use `tadoru pick --mode <mode>`. It prints the chosen path as one line
+on standard output, for you to pass to `cd`. Standard output carries that line and nothing else;
+messages and warnings go to standard error.
 
-| 終了コード | 意味 |
+| Exit code | Meaning |
 |---|---|
-| 0 | パスを 1 行出力した |
-| 1 | 選ばずに終了した（Esc / Ctrl-C） |
-| 2 | エラー。理由は標準エラーに出る |
+| 0 | A path was printed |
+| 1 | Closed without choosing (Esc / Ctrl-C) |
+| 2 | Error. The reason is on standard error |
 
-`0` 以外のときは移動しない。`1` と `2` を区別しないと、エラーを黙って握りつぶす。
+Change directory only on `0`. A wrapper that does not tell `1` from `2` hides errors.
 
-## PowerShell の .ps1 を PATH に置く方法
+## PowerShell scripts on PATH
 
-プロファイルを触らずに済ませたい場合、`c.ps1` などを PATH に置く手もある。
+To leave your profile alone, you can put `c.ps1` and the others on PATH instead.
 
 ```text
 tadoru init powershell --out
 ```
 
-`--out` の後ろに何も書かなければ exe と同じフォルダに出す。生成物が 1 か所に集まり、
-PATH に足すフォルダも 1 つで済む。別の場所に出したいときだけ `--out C:\path\on\PATH`
-のように指定する。
+With nothing after `--out`, the scripts are written next to the exe, so everything tadoru writes
+stays in one place and one PATH entry covers it. Give a folder, as in `--out C:\path\on\PATH`,
+only to write them somewhere else.
 
-制約が 2 つある。zoxide を使っていると `z` と `zi` はエイリアスが優先されるので、
-この方法では置き換えられない。実行ポリシーが Restricted だと .ps1 は動かない。
-zip から展開した直後はブロック属性が付くことがあるので、
-そのフォルダで `Unblock-File *.ps1` を実行する。
+This has two limits. With zoxide installed, its `z` and `zi` aliases win, so this way cannot
+replace them. And scripts do not run while the execution policy is Restricted. Files unzipped
+from a download may be marked as blocked; run `Unblock-File *.ps1` in that folder.
 
-## 更新したとき
+## After an update
 
-本体を差し替えただけならそのまま動く。シムは自分と同じフォルダの実行ファイルを先に探す。
-シェル連携の内容そのものが変わった場合は `tadoru setup` か `tadoru init` を実行し直し、
-新しいシェルを開くか初期化を読み直す。
+Replacing the executable is enough: the scripts look for the executable in their own folder
+first. If the shell integration itself has changed, run `tadoru setup` or `tadoru init` again,
+then open a new shell or load the setup again.
 
-## コマンド名を変える
+## Changing the command names
 
-既定の名前は `c`（ディレクトリ）、`cf`（ファイル）、`z` と `zi`（zoxide の履歴）。
-1 文字の名前は他のスクリプトとぶつかりやすく、`cf` は Cloud Foundry の CLI の名前でもある。
+The default names are `c` (directories), `cf` (files), and `z` and `zi` (the zoxide history).
+Single-letter names clash easily with other scripts, and `cf` is also the name of the Cloud
+Foundry command line tool.
 
-`--cmd` で頭の名前を変えられる。ファイル用はその名前に `f` を付けたものになる。
-`setup` にも `init` にも付けられ、`setup` は付けた名前をプロファイルの行にも書き込む。
+`--cmd` changes the main name; the file picker is that name with `f` added. It works with both
+`setup` and `init`, and `setup` writes it into the profile line as well.
 
 ```text
-tadoru setup --cmd j            # j と jf
-tadoru init cmd --out --cmd j   # j.cmd と jf.cmd
+tadoru setup --cmd j            # j and jf
+tadoru init cmd --out --cmd j   # j.cmd and jf.cmd
 ```
 
-`setup` と `init --out` は、同じ名前のコマンドが PATH 上にすでにあれば場所を表示する。
-cmd.exe と、PATH に置いた `.ps1` は PATH の先にあるほうが見つかるので、どちらが先かも表示する。
-PowerShell と bash の関数はそのシェルでは優先されるが、他のシェルでは元のコマンドが動く。
+`setup` and `init --out` show where a command with the same name is already on PATH. For
+cmd.exe and for `.ps1` scripts on PATH, whichever comes first on PATH is the one found, so they
+also say which that is. PowerShell and bash functions win inside their own shell, but other
+shells still run the other command.
 
-## zoxide との関係
+## zoxide
 
-履歴を使う `z`・`zi`・recent は zoxide の記録を読む。無い環境では、
-入れ方と代わりの手段を画面に表示する。`c`・`cf`・browse・favorites は本体だけで動く。
+`z`, `zi` and recent read what zoxide has recorded. Where zoxide is missing, the screen says how
+to install it and what to use instead. `c`, `cf`, browse and favorites need nothing else.
 
-履歴を自前で持たないのは、zoxide がシェルの cd フックですべての移動を記録しているため。
-tadoru が自前で持つと tadoru 経由の移動しか残らず、既存の履歴も捨てさせることになる。
-tadoru 経由で移動したフォルダは、zoxide が使える場合に `zoxide add` で記録する。
+tadoru keeps no history of its own because zoxide already records every directory change through
+the shell's cd hook. A history of tadoru's own would hold only the moves made through tadoru, and
+would mean giving up the history you already have. When zoxide is available, tadoru records the
+folders it takes you to with `zoxide add`.
 
-tadoru は zoxide の `z` と `zi` を自分の定義で置き換える。`z` で移動しても `c -` で戻れるように
-移動元を記録するためで、`zi` は tadoru の一覧で選ぶ。zoxide の元の `z` と `zi` を使いたい場合は
-`--no-z` を付ける。その場合 recent は `c` の画面で Shift-Tab を 2 回押すか、上枠の recent をクリックして開く。
+tadoru replaces zoxide's `z` and `zi` with its own. Its `z` records where you came from, so `c -`
+can take you back, and its `zi` picks from tadoru's list. To keep zoxide's own `z` and `zi`, add
+`--no-z`. Then open recent from `c` by pressing Shift-Tab twice, or by clicking recent on the top
+border.

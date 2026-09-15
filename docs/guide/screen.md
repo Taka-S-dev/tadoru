@@ -1,142 +1,171 @@
-# 画面と操作
+# The screen and keys
 
-モードごとの動き、マウス操作、アイコン表示、走査の制限をまとめる。
-使い始めるだけなら [README](../../README.md) で足りる。
+What each mode does, the mouse, icons, and the limits on scanning.
+To get started, the [README](../../README.md) is enough.
 
-## 設定ファイル
+## Configuration files
 
-設定ファイルは任意で、無ければ既定値で動く。**自動では作らない。**
-設定を何も変えていない利用者のディスクにファイルを残さないため。雛形が要るときは次を実行する。
+Configuration files are optional; without them, the defaults apply. **tadoru does not create them
+on its own**, so nothing is left on the disk of anyone who never changed a setting. To get a
+template, run:
 
 ```text
 tadoru config init
 ```
 
-全項目をコメント付きで書き出す。既存のファイルは上書きしない。
+It writes every setting with a comment. An existing file is never overwritten.
 
-置き場所は `TADORU_CONFIG_DIR`、`tadoru.exe` と同じフォルダの `config`、
-ユーザー設定フォルダの順に探す。`config` フォルダは自分で作ったときだけ使う。
-空のフォルダを先に作っておくと、以後の出力先がそこになる。作られることはない。ユーザー設定フォルダは Windows では
-`%APPDATA%\tadoru`、Linux では `~/.config/tadoru`（`XDG_CONFIG_HOME` 設定時はその配下）、
-macOS では `~/Library/Application Support/tadoru`。
-`config.toml`・`favorites.toml`・`actions.json` はいずれも同じフォルダに置く。
+tadoru looks for the folder in this order: `TADORU_CONFIG_DIR`, a folder named `config` next to
+`tadoru.exe`, then the user configuration folder. The `config` folder is only used if you created
+it: create it empty beforehand, and files are written there from then on. tadoru never creates it.
+The user configuration folder is `%APPDATA%\tadoru` on Windows, `~/.config/tadoru` on Linux (under
+`XDG_CONFIG_HOME` when that is set), and `~/Library/Application Support/tadoru` on macOS.
+`config.toml`, `favorites.toml` and `actions.json` all go in the same folder.
 
-## アイコン表示（任意）
+## Settings
 
-端末のフォントに [Nerd Font](https://www.nerdfonts.com/) を指定している場合、
-設定ファイルに次を追加すると、検索結果・browse・プレビューにアイコンを表示できる。
+Every setting in `config.toml` is optional.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `icons` | `false` | Shows file type icons. Needs a Nerd Font; see [Icons](#icons) |
+| `mouse` | `true` | Uses the mouse. `false` leaves text selection and the wheel to the terminal |
+| `temp_copy_max_mib` | `100` | The largest file a temporary copy may be, in MiB. `0` turns temporary copies off; see [the action menu](actions.md) |
+| `exclude` | `[".git", "node_modules", "dist", "build", "target"]` | Folder names skipped at any depth while scanning |
+| `scan_limit` | `200000` | The most entries one scan collects. `0` removes the limit; see [Scan limit](#scan-limit) |
+
+## Icons
+
+If your terminal uses a [Nerd Font](https://www.nerdfonts.com/), add this to the configuration file
+to show icons in the search results, browse and the preview.
 
 ```toml
 icons = true
 ```
 
-既定は `false`。対応フォントの自動判定は行わないため、四角や文字化けが出る場合は
-`icons = false` に戻す。フォントをインストールするだけでなく、端末側で選択する必要がある。
-アイコンは表示専用で、検索や移動先のパスには影響しない。
-Excel（xlsx / xlsm など）・CSV / TSV・Word・PowerPoint・PDF・設定ファイル・
-データベース・画像・音声・動画・圧縮ファイルなどを種類別に表示する。
-拡張子の大文字・小文字は区別せず、未対応の拡張子には汎用ファイルアイコンを使う。
-アイコンは種類ごとに色分けする（表計算は緑、Word は青、PowerPoint はオレンジ、PDF は赤）。
-ファイル名の色と検索一致部分の強調は維持する。
+The default is `false`. tadoru cannot tell whether the font has the icons, so if squares or garbled
+characters appear, set `icons = false` again. Installing the font is not enough: the terminal has to
+be set to use it. Icons are for display only and never change what is searched or where you go.
 
-## マウス・Esc操作
+Excel (xlsx, xlsm and others), CSV and TSV, Word, PowerPoint, PDF, configuration files, databases,
+images, audio, video and archives each get their own icon. Extensions match regardless of case,
+and any other extension gets a generic file icon. Icons are coloured by kind: spreadsheets green,
+Word blue, PowerPoint orange, PDF red. File name colours and the highlighting of matched
+characters stay as they are.
 
-一覧はマウスにも対応する（既定で有効）。項目をクリックすると選択し、一覧上のホイールで
-3項目ずつ上下に移動する。上部のモード名もクリックで切り替えられる。
-browse の中央列はクリックで選択し、左右の列のフォルダはクリックでそのフォルダへ移動する。
-中央列のフォルダはダブルクリック（同じ位置・項目を500 ms以内に2回）または Right で中に入る。
-絞り込みの対象はパス行が示すフォルダになる。例えば C をダブルクリックしてから
-`ssl` と入力すると C の中身を絞り込む。
-左列の現在地の項目をクリックした場合は親フォルダへ戻る。
-左右の列のファイルは、その親フォルダへ移動して選択する。ホイールは中央列が対象。
-アクションメニューは行の左のキー、クリック、または Enter で実行する。ホイールで選択を上下に移動できる。
-項目をクリックするとメニューが閉じてカーソルの下の表示が入れ替わるため、直後の 0.3 秒はクリックを受け付けない。
-連打しても、後ろにあった一覧を誤って操作しない。ホイールとキー操作はそのまま効く。
-各列の項目を右クリックすると既定のアプリで開く。フォルダはファイルマネージャで開く。
-別のアプリを起動する操作(右クリック・Ctrl-O・Ctrl-E・detach のアクション)は画面が変わらないので、
-結果を画面下部に表示する。成功と失敗で色を変え、常時表示のキー案内とも色で区別する。
-成功の表示は 3 秒で自動的に消える。失敗は読めるように、次の操作まで残す。
-起動を依頼した時点で tadoru の役目は終わり、アプリが実際に出た時刻は分からないため、進捗表示は行わない。
-Ctrl＋右クリックでは、その項目のアクションメニューを開く（Ctrl-P と同じ操作）。
-左右の列でも現在のフォルダを移動せず、クリックした項目を対象にする。
-検索画面の右側プレビューも右クリック・Ctrl＋右クリックに対応する。
-プレビューを左クリックすると browse に切り替え、フォルダなら移動、ファイルなら親フォルダで選択する。
-左クリックとダブルクリックはどの列でも選択と移動だけを行い、外部アプリは起動しない。
-シェルの移動先の確定は Enter を使う。
-端末標準の文字選択・ホイール操作を優先する場合は `config.toml` に `mouse = false` を指定して再起動する。
+## Mouse and Esc
 
-一覧画面では、フィルタ入力中の Esc はフィルタをクリアする。空の状態で Esc を押すと終了する。
-Ctrl-C はフィルタの有無にかかわらず終了する。
+The lists work with the mouse as well (on by default). Click an item to select it; the wheel moves
+the selection three items at a time. Click a mode name at the top to switch to it.
 
-一覧が画面に収まらないときは、一覧の右の枠線（browse では中央列の右の区切り線）に太い線を重ねて、
-いま表示している位置と範囲を示す。太い線が下端に届いていなければ、まだ下に項目がある。
-収まっているときは表示しない。
+In browse, a click in the middle column selects, and a click on a folder in the left or right
+column goes to that folder. Double-click a folder in the middle column (two clicks on the same item
+within 500 ms), or press Right, to go into it. The filter applies to the folder the path row
+names: double-click C and type `ssl`, and it filters what is inside C. Clicking the current
+folder's row in the left column goes up to the parent. Clicking a file in the left or right column
+goes to its folder and selects it. The wheel always scrolls the middle column.
 
-## 走査の上限
+In the action menu, press the key at the left of a row, click the row, or press Enter to run it.
+The wheel moves the selection. Clicking an item closes the menu and changes what is under the
+pointer, so clicks are ignored for 0.3 seconds afterwards; a quick second click cannot land on the
+list that was behind the menu. The wheel and the keyboard keep working.
 
-dirs と files は見つけたパスを終了までメモリに置く。数文字で全件を絞り込むのに要るためで、
-そのぶんドライブの上の方から走査すると数百 MB になる。1 回の走査で集める件数に上限があり、
-既定は 20 万件。`config.toml` の `scan_limit` で変えられ、`0` で上限なしになる。
+Right-click an item in any column to open it with its default application; a folder opens in the
+file manager. From the keyboard, Ctrl-O shows the selected item in the file manager and Ctrl-E
+opens it with its default application. Actions that start another application (right-click,
+Ctrl-O, Ctrl-E and `detach` actions) leave the screen as it is, so their result is shown at the
+bottom of the screen. Success and failure have different colours, and both differ from the key
+hints that are always there. A success message goes away after 3 seconds; a failure stays until the
+next key or click, so it can be read. tadoru's part ends once it has asked for the application to
+start, and it cannot tell when the application actually appears, so no progress is shown.
 
-上限で止まった場合は件数の右に **stopped at scan_limit, ^A: collect the rest** と表示する。
-一覧が途中までであることを黙って隠さないため。
+Ctrl+right-click opens that item's action menu, the same as Ctrl-P. In the left and right columns
+it does not change the current folder; the item clicked is the target. The preview on the right of
+the search screen answers right-click and Ctrl+right-click too. A left click in the preview switches
+to browse, going into a folder, or going to a file's folder and selecting the file. Left clicks and
+double-clicks only select and move, in every column, and never start another application. To choose
+where the shell goes, press Enter.
 
-その場で **Ctrl-A** を押すと、上限を外して集め直す。設定を書き換えて開き直す必要はない。
-走査は最初からやり直しになるが、入力中の絞り込みは残る。
-以後そのセッションで開くモードも上限なしで集める。メモリはそのぶん増える。
+To keep the terminal's own text selection and wheel, set `mouse = false` in `config.toml` and start
+tadoru again.
 
-目的のフォルダが出てこないときは、browse で目的の階層まで下りてから Tab で戻り、
-起点を狭めるほうが速いことが多い。
+In a list, Esc clears the filter while there is one, and quits once the filter is empty. Ctrl-C
+quits either way.
 
-browse で `C:\` まで上がってから Tab で検索に戻ると、そこが走査の起点になる。
-これが上限に当たりやすい経路なので、深い場所に戻ってから切り替えるとよい。
+When a list is longer than the screen, a thick line over the list's right border (in browse, over
+the line right of the middle column) shows which part of it is on screen. If the thick line does
+not reach the bottom, there are more items below. Nothing is drawn when everything fits.
 
-## ネットワークドライブでの制限
+## Scan limit
 
-Windows では、ネットワーク上の `dirs` / `files` 再帰走査を開始前にブロックする。
-UNC パス、ネットワークドライブに割り当てられたドライブ文字、種類を確認できないドライブが対象。
-ブロック時は Tab で `browse` に切り替える。F5 でも制限は解除されない。
-走査先ルートのリンク先も確認し、走査途中のディレクトリ再解析ポイント（ジャンクション等）は辿らない。
-`browse` は使用できるが、一覧表示やプレビューのための通信は発生する。
-Linux / macOS のネットワークマウントの自動判定には未対応。
+dirs and files keep every path they find in memory until tadoru exits, which is what lets a few
+letters filter all of them. Started near the top of a drive, that runs to hundreds of MB, so one
+scan collects at most a set number of entries: 200,000 by default. Change it with `scan_limit` in
+`config.toml`; `0` removes the limit.
 
-## モードとお気に入り
+When a scan stops at the limit, **stopped at scan_limit, ^A: collect the rest** appears to the
+right of the count, so a partial list never passes for a complete one.
 
-**Tab** で検索と browse を行き来する。検索は dirs・files・recent・favorites のどれかで、
-browse から Tab で戻ると直前に使っていた検索に戻る。`cf` で開いたなら files と browse、
-`zi` なら recent と browse の往復になる。探すことと周りを見ることを最も頻繁に行き来するので、
-その 2 つを 1 キーで結んでいる。戻り先は browse の画面下部のキー案内に `Tab: files` のように表示する。
-**Shift-Tab** は検索の種類を dirs → files → recent → favorites の順に切り替える。
-browse で押した場合は、Tab と同じく検索に戻る。上枠のモード名をクリックすると、そのモードへ直接切り替わる。
-上枠のタブは `[dirs|files|recent|favorites]  [browse]` と、Shift-Tab で回る検索の 4 つと browse を分けて並べる。
+Press **Ctrl-A** there to collect again without the limit, with no need to edit the settings and
+start again. The scan starts over, but the filter you typed stays. Modes opened later in the same
+session also collect without the limit, and use more memory for it.
 
-browse は走査中のフォルダを開き、dirs や files で選んでいた項目をそのまま選択する。
-選んだフォルダの中には入らない。入ると直前まで見ていた並びが消えるうえ、一覧を
-動かしていなければ選択はただの先頭行なので、意図しない場所に入ることになる。
-recent と favorites は走査中のフォルダとは別の場所を並べるので、そこから browse に
-切り替えても、選んでいた項目は開き先に影響しない。
+When the folder you want does not show up, it is often quicker to go down to its level in browse
+and press Tab, which narrows where the search starts.
 
-dirs と files のパス行は、その検索が対象にしているフォルダを示す。
-階層名をクリックするか **Left** を押すと、そこを起点に探し直す。
-ヘッダ左端の **◀ ▶ ▲** も browse と同じ位置にあり、検索では起点に対して働く。
-browse の Left が階層を 1 段上がるのと同じ位置づけで、検索の範囲が 1 段広がる。
-入力中の絞り込みは残る。ドライブの直下より上には行けず、その旨を表示する。
-recent と favorites は特定のフォルダを走査しないので、パスの代わりに出どころを表示する。
-一度開いた browse はモードを往復しても現在地・選択・フィルタを保持する。
-モード名を再度クリックしても現在地や選択はリセットしない。
-ただし走査の起点が動いた後は、その起点に合わせ直す。検索が別の場所を見ているのに
-browse だけ以前の場所に戻ると、無関係なフォルダへ飛んだように見えるため。
-F5 で一覧とプレビューを更新する。browse では絞り込みと選択位置を可能な限り保つ。
-履歴の取得失敗は画面に理由を表示し、F5 で再試行、Shift-Tab でほかの一覧へ移動できる。
+Going up to `C:\` in browse and pressing Tab makes the whole drive the starting point. That is the
+easiest way to hit the limit, so go back somewhere deeper before switching.
 
-画面内の **Ctrl-B** で、選択中のフォルダをお気に入りに登録・解除できる。
-登録済みのフォルダには黄色の **★** を表示する。アイコン表示を無効にしていても表示される。
-別のシェルから変更した場合は F5 で反映する。ファイルを選択している場合はその親フォルダを登録する。
-files モードの ★ は、そのファイルの親フォルダがお気に入りであることを示す。
-Shift-Tab で **favorites** まで切り替えるか上枠の favorites をクリックし、絞り込んで Enter で移動する。zoxide は不要。
-削除済みのフォルダも一覧に残すので、Ctrl-B で解除できる。
+## Network drives
 
-コマンドからも管理できる（パス省略時は現在のフォルダ）。
+On Windows, recursive `dirs` and `files` scans of network locations are refused before they start.
+This covers UNC paths, drive letters mapped to network drives, and drives whose type cannot be
+determined. When a scan is refused, press Tab to switch to `browse`; F5 does not lift the
+restriction. The folder the scan root links to is checked too, and reparse points such as junctions
+are not followed during a scan. `browse` still works, but listing and previewing folders does go
+over the network. Network mounts on Linux and macOS are not detected.
+
+## Modes and favorites
+
+**Tab** goes between the search and browse. The search is one of dirs, files, recent and favorites,
+and Tab from browse returns to the one used last: after `cf` it goes between files and browse, and
+after `zi` between recent and browse. Looking for something and looking around are what you switch
+between most, so one key joins the two. Browse's key hints name the search Tab goes back to, as in
+`Tab: files`.
+
+**Shift-Tab** changes the kind of search, in the order dirs → files → recent → favorites. In browse
+it goes back to the search, as Tab does. Clicking a mode name on the top border goes straight to
+that mode. The tabs there are laid out as `[dirs|files|recent|favorites]  [browse]`, keeping the
+four searches Shift-Tab steps through apart from browse.
+
+Browse opens the folder being searched, with the item selected in dirs or files still selected. It
+does not go into the selected folder: that would replace the list you had just been reading, and in
+a list nobody has moved, the selection is only the first row, so you would land somewhere you never
+chose. recent and favorites list places other than the folder being searched, so switching to browse
+from them opens the same place whatever was selected.
+
+The path row in dirs and files shows the folder the search covers. Click a step of it, or press
+**Left**, to search from there instead. The **◀ ▶ ▲** buttons at the left of that row are in the same
+place as in browse, and in a search they act on the starting point: where Left in browse goes up a
+level, here it widens the search by a level. The filter you typed stays. The search cannot go above
+the top of a drive, and the screen says so. recent and favorites do not scan a folder, so they show
+where their entries come from instead of a path.
+
+Once opened, browse keeps its folder, selection and filter as you switch modes, and clicking its mode
+name again does not reset them. After the search has moved, though, browse lines up with the new
+starting point, since coming back to an old folder while the search looks elsewhere would look like a
+jump to an unrelated place. F5 refreshes the list and the preview; in browse it keeps the filter and
+the selection where it can. If the history cannot be read, the screen shows why: press F5 to try
+again, or Shift-Tab to go to another list.
+
+Press **Ctrl-B** to pin or unpin the selected folder as a favorite. Pinned folders show a yellow
+**★**, even with icons turned off. Changes made from another shell show up after F5. With a file
+selected, its folder is pinned. In files, ★ means the file's folder is a favorite. To go to a
+favorite, press Shift-Tab until you reach **favorites**, or click favorites on the top border, then
+filter and press Enter. zoxide is not needed. Folders that have since been deleted stay in the list,
+so they can still be unpinned with Ctrl-B.
+
+Favorites can be managed from the command line too. Without a path, the current folder is used.
 
 ```text
 tadoru favorite add
@@ -145,40 +174,46 @@ tadoru favorite remove "C:\work\my project"
 tadoru favorite list
 ```
 
-保存先は設定ファイルと同じフォルダの `favorites.toml`。
-複数のシェルから登録しても更新が失われないよう、保存処理を排他制御する。
+They are saved in `favorites.toml`, in the same folder as the configuration files. Saving takes a
+lock, so pinning from several shells at once does not lose updates.
 
-## browse の移動と履歴
+## Moving and history in browse
 
-browse は [Miller columns](https://en.wikipedia.org/wiki/Miller_columns)。
-NeXTSTEP のファイルビューアを経て macOS の Finder の列表示になった並べ方で、
-ranger や yazi も似た列表示をとる。左が親、中央が今の階層、右が選択先の中身。
-tadoru は cd の道具なので、コピー・削除・名前変更は持たない。
-中央だけが背景色とポインタを持つので、カーソルがどの列にあるか迷わない。
-左右の列は今いるフォルダをアクセント色で示す。
+Browse uses [Miller columns](https://en.wikipedia.org/wiki/Miller_columns), the layout that went from
+the NeXTSTEP file viewer to the column view of Finder on macOS; ranger and yazi use similar columns.
+The parent is on the left, the current folder in the middle, and what the selection holds on the
+right. tadoru is a tool for cd, so it does not copy, delete or rename. Only the middle column has a
+background and a pointer, so it is always clear which column the cursor is in. The left and right
+columns mark the current folder in an accent colour.
 
-**Ctrl＋←で戻る、Ctrl＋→で進む**。Alt＋←、Alt＋→ でも同じ動作をする。ただし端末が Alt＋矢印をペイン移動などに割り当てていると、そのキーは tadoru まで届かないので Ctrl を使う。親階層への移動とは異なり、訪問した場所の履歴を辿る。
-検索モードでも同じキーが効き、そちらは走査の起点の履歴を辿る。
-browse で移動してから Tab で戻ると起点が移るので、迷った末に妙な場所が起点になっても
-1 打で戻せる。起点が変わったときは画面下部にその場所と戻し方を表示する。
-戻ると、そのとき入力していた絞り込みも一緒に戻る。
-戻った先のフィルタ・選択も復元する。戻った後に別の場所へ移動すると進む履歴を破棄する。
-履歴は実行中のみ、各方向最大 100 件。削除済みの場所は飛ばす。
-マウスのサイドボタンは現在の入力ライブラリでは直接受け取れないため、
-マウスの設定ソフトで Ctrl＋←、Ctrl＋→を割り当てると利用できる。
+**Ctrl+← goes back and Ctrl+→ goes forward.** Alt+← and Alt+→ do the same, but if the terminal uses
+Alt with the arrows for something else, such as moving between panes, those keys never reach tadoru,
+so use Ctrl. Unlike going up a level, these follow the history of places visited. The same keys work
+in a search, where they follow the history of starting points. Moving in browse and pressing Tab
+moves the starting point, so even a starting point you wandered into is one key away from being
+undone. When the starting point changes, the bottom of the screen names the new place and how to go
+back.
 
-ヘッダ左端の **◀ 戻る・▶ 進む・▲ 親へ** はクリックでキー操作と同じ動作をする。
-行き先がない方向は灰色で表示し、押しても反応しない。
+Going back also brings back the filter that was typed at the time, and the filter and selection of
+the place you return to. Moving somewhere new after going back drops the forward history. The history
+lasts only while tadoru runs, keeps up to 100 places in each direction, and skips places that have
+been deleted. The mouse's side buttons cannot be received directly by the input library tadoru uses;
+to use them, assign Ctrl+← and Ctrl+→ to them in the mouse's own software.
 
-パスはパンくずとして使える。階層名をクリックするとその階層へ移動する。
-今いるフォルダ名は白の太字、その手前の階層は灰色。幅に収まらず削られた部分はクリックできない。
+The **◀ back, ▶ forward and ▲ up** buttons at the left of the header do the same as the keys when
+clicked. A direction with nowhere to go is shown in grey and does nothing.
 
-上枠にモード名、その下の行にパスを置く。モードは変わらない操作子なので枠に、
-パスは移動のたびに変わるので専用の行に置いている。どちらもクリックできる。
+The path works as a breadcrumb: click a step to go there. The current folder's name is bold white,
+and the steps before it are grey. Parts cut off for lack of room cannot be clicked.
 
-画面は端末の全高を使う。上に残っていたシェルの履歴はスクロールして退避し、
-終了すると元の表示に戻る。履歴はスクロールバックに残る。
+Mode names sit on the top border and the path on the row below. The modes never change, so they
+belong on the border; the path changes with every move, so it gets a row of its own. Both can be
+clicked.
 
-`c -` は同じシェル内で `c`・`cf`・`z`・`zi` が成功したときの移動元に戻る。
-キャンセル・失敗・同じ場所への移動では戻り先を更新しない。通常の `cd` は記録しない。
-戻り先がない場合や削除済みの場合は、理由を表示して移動しない。
+The screen uses the full height of the terminal. Shell output that was on screen is scrolled up out
+of the way, and the screen is put back when tadoru exits; that output stays in the scrollback.
+
+`c -` goes back to where you were before the last successful `c`, `cf`, `z` or `zi` in the same
+shell. Cancelling, a failure, or a move to the same place does not change it, and a plain `cd` is
+not recorded. If there is nowhere to go back to, or that place has been deleted, tadoru says why and
+stays put.

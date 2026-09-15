@@ -1,9 +1,10 @@
-# 許可リスト方式: いったん全部無視し、リポジトリの構成ファイルだけ戻す
+# Allowlist: ignore everything, then bring back only the files the repository is made of
 *
 !.gitignore
 !Cargo.toml
 !Cargo.lock
 !README.md
+!README.ja.md
 !LICENSE
 !src/
 !src/**
@@ -17,14 +18,14 @@
 !docs/guide/
 !docs/guide/**
 
-# 許可の後ろで再拒否(名前で指定)
+# Denied again by name, after the allowlist
 target/
-# 設計メモは非公開。docs/ 自体は許可しないと配下の guide に降りられないので、
-# 直下のファイルだけを名指しで拒否する
+# Design notes stay private. docs/ itself has to be allowed to reach docs/guide,
+# so the files directly under it are denied by name
 docs/*.md
 docs/*/
 !docs/guide/
-# 画面のキャプチャ。docs/*/ で閉じた後なので、ここで名指しで開ける
+# Screen captures. docs/*/ closed the folder above, so it is opened again by name here
 !docs/images/
 !docs/images/**
 .env
@@ -33,7 +34,7 @@ secrets.*
 credentials.*
 *.pem
 id_rsa*
-# SSH の他の鍵形式と、証明書・キーストア・認証情報ファイル
+# Other SSH key formats, and certificate, keystore and credential files
 id_dsa*
 id_ecdsa*
 id_ed25519*

@@ -1,11 +1,11 @@
-# 画面のキャプチャ
+# Screen captures
 
-README から貼る画像を置く。
+Images used by the README go here.
 
-| ファイル | 撮るもの |
+| File | What to capture |
 |---|---|
-| `browse.png` | browse の 3 列。上枠のモード、パス行、左右の列が写るように |
-| `actions.png` | Ctrl-P のアクションメニュー。行の左のキーが読めるように |
+| `browse.png` | Browse's three columns, with the modes on the top border, the path row and both side columns in view |
+| `actions.png` | The Ctrl-P action menu, with the keys at the left of the rows readable |
 
-撮り方は、端末を広めにして `c` を開き、Tab で browse にしてから撮る。
-背景に個人のフォルダ名や社名が写り込んでいないか、貼る前に確認する。
+Make the terminal fairly wide, open `c`, press Tab to switch to browse, then capture.
+Before adding an image, check that no personal folder names or other private names show in it.
