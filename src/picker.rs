@@ -232,6 +232,9 @@ struct Picker {
     /// two are about different folders, and coming back to browse landed on
     /// whatever it had been looking at before, unrelated to the search.
     browser_root: PathBuf,
+    /// The search Tab returns to from browse: the last mode used that is not
+    /// browse. The one a picker opened in, so `cf` goes back to files.
+    search_mode: Mode,
     /// Set once the reader asks for a list that stopped at the ceiling to be
     /// collected in full. Scans started afterwards ignore `scan_limit`.
     unlimited: bool,
@@ -318,6 +321,7 @@ pub fn run(args: PickArgs, root: PathBuf, config: Config) -> Result<Option<PathB
         sources: std::array::from_fn(|_| None),
         browser: (args.mode == Mode::Browse).then(|| Browser::new(root.clone())),
         browser_root: root.clone(),
+        search_mode: first_search(args.mode),
         mode: args.mode,
         query: String::new(),
         root,
@@ -371,6 +375,26 @@ fn mode_index(mode: Mode) -> usize {
         .iter()
         .position(|&m| m == mode)
         .expect("known mode")
+}
+
+/// The search a picker opened in `mode` goes back to from browse. One opened
+/// straight into browse has not searched yet, so it gets the directory search.
+fn first_search(mode: Mode) -> Mode {
+    if mode == Mode::Browse {
+        Mode::Dirs
+    } else {
+        mode
+    }
+}
+
+/// The search after `mode` in tab order, for Shift-Tab. Browse is where Tab
+/// goes rather than another kind of search, so it is passed over.
+fn next_search(mode: Mode) -> Mode {
+    let start = mode_index(mode);
+    (1..MODE_ORDER.len())
+        .map(|step| MODE_ORDER[(start + step) % MODE_ORDER.len()])
+        .find(|&m| m != Mode::Browse)
+        .expect("a search mode")
 }
 
 impl Picker {
@@ -462,15 +486,40 @@ impl Picker {
         self.preview = None;
     }
 
+    /// Tab: from a search to browse, and from browse back to the search it
+    /// came from.
+    ///
+    /// Looking for something and looking around are what the picker is
+    /// switched between most, so they take one key each way.
+    fn toggle_browse(&mut self) {
+        let target = if self.mode == Mode::Browse {
+            self.search_mode
+        } else {
+            Mode::Browse
+        };
+        self.switch_to(target);
+    }
+
+    /// Shift-Tab: the next kind of search. Browse goes back to its search
+    /// instead, as Tab does, so the key never leaves the reader in browse.
+    fn next_search_mode(&mut self) {
+        let target = if self.mode == Mode::Browse {
+            self.search_mode
+        } else {
+            next_search(self.mode)
+        };
+        self.switch_to(target);
+    }
+
     /// First entry into browse uses the search selection; subsequent mode
     /// switches restore the existing browser, including its filter and selection.
-    fn switch_mode(&mut self, step: isize) {
+    fn switch_to(&mut self, entering: Mode) {
         let leaving = self.mode;
-        let idx = mode_index(leaving) as isize + step;
-        let len = MODE_ORDER.len() as isize;
-        let entering = MODE_ORDER[idx.rem_euclid(len) as usize];
         if entering == leaving {
             return;
+        }
+        if entering != Mode::Browse {
+            self.search_mode = entering;
         }
 
         if leaving == Mode::Browse {
@@ -730,14 +779,12 @@ impl Picker {
         if mouse.kind == MouseEventKind::Down(MouseButton::Left)
             && self.mouse_header.contains(position)
         {
-            let mut x = self.mouse_modes_x;
-            for (index, mode) in MODE_ORDER.iter().enumerate() {
-                let end = x + mode.label().len() as u16;
-                if mouse.column >= x && mouse.column < end {
-                    self.switch_mode(index as isize - mode_index(self.mode) as isize);
+            let first = self.mouse_modes_x;
+            for (mode, start, end) in tab_offsets() {
+                if mouse.column >= first + start && mouse.column < first + end {
+                    self.switch_to(mode);
                     return;
                 }
-                x = end + 1;
             }
         }
         let (area, first, count) = self.mouse_rows;
@@ -1011,11 +1058,11 @@ impl Picker {
             (KeyCode::Char('c'), true) => return Action::Cancel,
             (KeyCode::Enter, _) => return Action::Accept,
             (KeyCode::Tab, _) => {
-                self.switch_mode(1);
+                self.toggle_browse();
                 return Action::Continue;
             }
             (KeyCode::BackTab, _) => {
-                self.switch_mode(-1);
+                self.next_search_mode();
                 return Action::Continue;
             }
             // Hand the selection to the desktop and stay open, as yazi does.
@@ -1174,9 +1221,21 @@ impl Picker {
             .border_type(BorderType::Rounded)
             .border_style(theme::BORDER)
             .title(Line::from(mode_tabs(mode)))
+            // Shift-Tab is named by where it leads, as Tab is in browse.
             .title_bottom(footer_line(
                 self.notice.as_deref(),
-                " Tab: mode  ^P: actions  ^B: pin  F5: refresh  Enter: cd  Esc: clear/exit ",
+                &fit_hints(
+                    &[
+                        "Tab: browse",
+                        &format!("S-Tab: {}", next_search(mode).label()),
+                        "Enter: cd",
+                        "Esc: clear/exit",
+                        "^P: actions",
+                        "^B: pin",
+                        "F5: refresh",
+                    ],
+                    list_area.width.saturating_sub(2) as usize,
+                ),
             ));
         let inner = block.inner(list_area);
         frame.render_widget(block, list_area);
@@ -1257,7 +1316,7 @@ impl Picker {
         if let Some(error) = &source.scan_error {
             frame.render_widget(
                 Paragraph::new(format!(
-                    "Cannot load {}: {error}\nF5: retry  Tab: mode  Esc: cancel",
+                    "Cannot load {}: {error}\nF5: retry  Shift-Tab: other list  Esc: cancel",
                     mode.label()
                 ))
                 .style(Style::default().fg(Color::Red))
@@ -1268,14 +1327,16 @@ impl Picker {
         }
         if mode == Mode::Recent && !scanning && total == 0 {
             frame.render_widget(
-                Paragraph::new("No history yet. F5: refresh  Tab: mode"),
+                Paragraph::new("No history yet. F5: refresh  Shift-Tab: other list"),
                 rows_area,
             );
         }
         if mode == Mode::Favorites && !scanning && total == 0 {
             frame.render_widget(
-                Paragraph::new("No favorites yet. Ctrl-B: pin a folder in another mode. Tab: mode")
-                    .wrap(Wrap { trim: false }),
+                Paragraph::new(
+                    "No favorites yet. Ctrl-B: pin a folder in another mode. Shift-Tab: other list",
+                )
+                .wrap(Wrap { trim: false }),
                 rows_area,
             );
         }
@@ -1405,9 +1466,22 @@ impl Picker {
             .border_type(BorderType::Rounded)
             .border_style(theme::BORDER)
             .title(Line::from(mode_tabs(Mode::Browse)))
+            // Tab goes back to whichever search was used last, so the hint
+            // names it rather than leaving the reader to remember.
             .title_bottom(footer_line(
                 self.notice.as_deref(),
-                " Left: up  Right: enter  Ctrl/Alt-Left/Right: history  Tab: mode  ^P: actions  ^B: pin  Enter: cd ",
+                &fit_hints(
+                    &[
+                        &format!("Tab: {}", self.search_mode.label()),
+                        "Enter: cd",
+                        "Left: up",
+                        "Right: enter",
+                        "Ctrl/Alt-Left/Right: history",
+                        "^P: actions",
+                        "^B: pin",
+                    ],
+                    area.width.saturating_sub(2) as usize,
+                ),
             ));
         let inner = block.inner(area);
         frame.render_widget(block, area);
@@ -1775,11 +1849,28 @@ fn browse_row(
     ListItem::new(line.style(style))
 }
 
+/// Key hints for the bottom border, most important first, keeping as many
+/// whole hints as fit in `width` columns.
+///
+/// The border draws them right-aligned and cuts whatever does not fit from
+/// the left, which is where Tab is. Dropping the least used hints instead
+/// keeps the keys that move between screens on a narrow terminal.
+fn fit_hints(hints: &[&str], width: usize) -> String {
+    let mut kept = hints.len();
+    loop {
+        let line = format!(" {} ", hints[..kept].join("  "));
+        if kept <= 1 || line.width() <= width {
+            return line;
+        }
+        kept -= 1;
+    }
+}
+
 /// The bottom border: a notice when there is one, otherwise the key hints.
 ///
 /// A notice is drawn in its own colour so it cannot be mistaken for the hints
 /// that are always there, and failures are marked apart from confirmations.
-fn footer_line(notice: Option<&str>, hints: &'static str) -> Line<'static> {
+fn footer_line(notice: Option<&str>, hints: &str) -> Line<'static> {
     match notice {
         Some(text) => {
             let failed = text.starts_with("Cannot") || text.starts_with("No ");
@@ -1790,7 +1881,7 @@ fn footer_line(notice: Option<&str>, hints: &'static str) -> Line<'static> {
             };
             Line::from(Span::styled(format!(" {text} "), style)).right_aligned()
         }
-        None => Line::from(Span::styled(hints, theme::BORDER)).right_aligned(),
+        None => Line::from(Span::styled(hints.to_string(), theme::BORDER)).right_aligned(),
     }
 }
 
@@ -1987,13 +2078,38 @@ fn crumb_spans(path: &Path) -> Vec<(Span<'static>, Option<PathBuf>)> {
     spans
 }
 
-/// Just the `[dirs|files|...]` part, so a caller that needs to know where the
-/// path begins can measure it.
+/// What is drawn before a tab's label, after the one before it.
+///
+/// The four searches share a bracket and browse has its own: Shift-Tab steps
+/// through the searches and Tab goes across to browse, and five tabs in one
+/// row read as five of the same kind.
+fn tab_separator(mode: Mode) -> &'static str {
+    if mode == Mode::Browse { "]  [" } else { "|" }
+}
+
+/// Where each tab's label starts and ends, counted in columns from the first
+/// label. Drawing and clicking both go by it, so a click cannot land on a
+/// different tab from the one drawn there.
+fn tab_offsets() -> Vec<(Mode, u16, u16)> {
+    let mut offsets = Vec::new();
+    let mut x = 0;
+    for (i, &m) in MODE_ORDER.iter().enumerate() {
+        if i > 0 {
+            x += tab_separator(m).len() as u16;
+        }
+        let end = x + m.label().len() as u16;
+        offsets.push((m, x, end));
+        x = end;
+    }
+    offsets
+}
+
+/// The tabs, `[dirs|files|recent|favorites]  [browse]`, drawn on the top border.
 fn mode_tabs(mode: Mode) -> Vec<Span<'static>> {
     let mut header: Vec<Span> = vec![Span::styled("[", theme::HEADER)];
     for (i, &m) in MODE_ORDER.iter().enumerate() {
         if i > 0 {
-            header.push(Span::styled("|", theme::HEADER));
+            header.push(Span::styled(tab_separator(m), theme::HEADER));
         }
         let style = if m == mode {
             theme::HEADER.add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
@@ -2306,6 +2422,7 @@ mod tests {
             pinned: crate::favorites::Index::default(),
             menu: None,
             browser_root: PathBuf::new(),
+            search_mode: first_search(mode),
             unlimited: false,
             roots_back: Vec::new(),
             roots_forward: Vec::new(),
@@ -2383,12 +2500,12 @@ mod tests {
         let mut picker = test_picker(root.clone(), Mode::Browse);
         picker.browser().set_filter("AWS");
         let selected = picker.browser().selected_path();
-        picker.switch_mode(1);
+        picker.toggle_browse();
         assert_eq!(picker.mode, Mode::Dirs);
         let source = picker.source();
         source.finish_scan();
         while source.matcher.tick(TICK_MS).running {}
-        picker.switch_mode(-1);
+        picker.toggle_browse();
         assert_eq!(picker.browser().cwd, root);
         assert_eq!(picker.browser().filter, "AWS");
         assert_eq!(picker.browser().selected_path(), selected);
@@ -2477,7 +2594,7 @@ mod tests {
 
     #[test]
     fn a_notice_is_told_apart_from_the_permanent_key_hints() {
-        const HINTS: &str = " Tab: mode  Enter: cd ";
+        const HINTS: &str = " Tab: browse  Enter: cd ";
         let style_of = |line: &Line<'static>| line.spans[0].style;
 
         // With nothing to say the bar is furniture, drawn like the border.
@@ -2814,7 +2931,7 @@ mod tests {
         let mut picker = test_picker(root.clone(), Mode::Dirs);
         picker.source().finish_scan();
         while picker.source().matcher.tick(TICK_MS).running {}
-        picker.switch_mode(-1);
+        picker.toggle_browse();
         assert_eq!(picker.mode, Mode::Browse);
         assert_eq!(picker.browser().cwd, root);
         let shown = picker.browser().selected_path();
@@ -2845,15 +2962,15 @@ mod tests {
         let mut picker = test_picker(deep.clone(), Mode::Dirs);
 
         // Browse opens where the search is.
-        picker.switch_mode(-1);
+        picker.toggle_browse();
         assert_eq!(picker.browser().cwd, deep);
 
         // Flipping back and forth keeps the place, which is the point of
         // browse remembering anything at all.
         picker.browser().up();
         let stopped = picker.browser().cwd.clone();
-        picker.switch_mode(1);
-        picker.switch_mode(-1);
+        picker.toggle_browse();
+        picker.toggle_browse();
         assert_eq!(picker.browser().cwd, stopped);
 
         // Once the search moves somewhere else, browse lines up with it
@@ -2885,12 +3002,12 @@ mod tests {
                 Box::new(|p: &mut Picker| p.navigate(Nav::Back)),
             ),
         ] {
-            picker.switch_mode(1);
+            picker.toggle_browse();
             let before = picker.root.clone();
             move_root(&mut picker);
             let moved = picker.root.clone();
             assert_ne!(moved, before, "{name} did not move the search");
-            picker.switch_mode(-1);
+            picker.toggle_browse();
             assert_eq!(picker.browser().cwd, moved, "browse stayed behind: {name}");
         }
 
@@ -2945,11 +3062,11 @@ mod tests {
 
         // Wander up in browse, then leave: the search now covers somewhere
         // the reader never chose, which is the whole complaint.
-        picker.switch_mode(-1);
+        picker.toggle_browse();
         assert_eq!(picker.mode, Mode::Browse);
         picker.browser().up();
         picker.browser().up();
-        picker.switch_mode(1);
+        picker.toggle_browse();
         assert_eq!(picker.root, root);
         // Saying so is what stops it happening unnoticed.
         let notice = picker.notice.clone().expect("no notice");
@@ -3125,6 +3242,69 @@ mod tests {
         });
         assert_eq!(picker.mode, Mode::Dirs);
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn browse_sits_apart_from_the_searches_and_each_tab_takes_its_own_clicks() {
+        use ratatui::backend::TestBackend;
+        let root = crate::testing::temp_dir().join(format!("tadoru-groups-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        // The top border, one cell per column: the border glyphs are multi-byte.
+        let top_row = |picker: &mut Picker| {
+            let mut terminal = Terminal::new(TestBackend::new(100, 12)).unwrap();
+            terminal
+                .draw(|frame| picker.render(frame.area(), frame))
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            (0..100u16)
+                .map(|x| buffer[(x, 0)].symbol().to_string())
+                .collect::<Vec<_>>()
+        };
+        let find = |cells: &[String], text: &str| -> u16 {
+            let len = text.chars().count();
+            (0..=cells.len() - len)
+                .find(|&x| cells[x..x + len].concat() == text)
+                .unwrap_or_else(|| panic!("{text:?} not in {}", cells.concat())) as u16
+        };
+        let click = |picker: &mut Picker, column: u16| {
+            picker.handle_mouse(MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column,
+                row: 0,
+                modifiers: KeyModifiers::NONE,
+            });
+        };
+
+        // The four searches share one bracket; browse, which Tab pairs with
+        // them, has its own.
+        let mut picker = test_picker(root.clone(), Mode::Browse);
+        find(
+            &top_row(&mut picker),
+            "[dirs|files|recent|favorites]  [browse]",
+        );
+
+        // The first and last letter of each label switch to that mode.
+        for mode in MODE_ORDER {
+            let start_in = if mode == Mode::Browse {
+                Mode::Dirs
+            } else {
+                Mode::Browse
+            };
+            for offset in [0, mode.label().len() as u16 - 1] {
+                let mut picker = test_picker(root.clone(), start_in);
+                let at = find(&top_row(&mut picker), mode.label()) + offset;
+                click(&mut picker, at);
+                assert_eq!(picker.mode, mode, "{} at +{offset}", mode.label());
+            }
+        }
+
+        // The space between the groups switches nothing.
+        let mut picker = test_picker(root.clone(), Mode::Browse);
+        let gap = find(&top_row(&mut picker), "]  [") + 1;
+        click(&mut picker, gap);
+        assert_eq!(picker.mode, Mode::Browse, "the gap switched modes");
+
+        crate::testing::remove_tree(&root);
     }
 
     #[test]
@@ -3439,7 +3619,7 @@ mod tests {
                 picker.sources[mode_index(Mode::Recent)] = Some(source);
                 if via_tab {
                     picker.mode = Mode::Files;
-                    picker.switch_mode(1);
+                    picker.switch_to(Mode::Recent);
                 }
                 let mut terminal = Terminal::new(TestBackend::new(100, 16)).unwrap();
                 terminal
@@ -3459,7 +3639,8 @@ mod tests {
                 } else {
                     assert!(text.contains("No history yet"));
                 }
-                picker.switch_mode(1);
+                // The way out the screen names takes the reader to the next list.
+                picker.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
                 assert_eq!(picker.mode, Mode::Favorites);
             }
         }
@@ -3495,7 +3676,7 @@ mod tests {
         while picker.source().matcher.tick(TICK_MS).running {}
         eprintln!("dirs_scanned mib={:.1}", mib());
 
-        picker.switch_mode(-1);
+        picker.toggle_browse();
         assert_eq!(picker.mode, Mode::Browse);
         eprintln!("entered_browse mib={:.1}", mib());
 
@@ -3520,7 +3701,7 @@ mod tests {
 
         // Tab out: the browse location becomes the scan root, so every list
         // starts again from there.
-        picker.switch_mode(1);
+        picker.toggle_browse();
         picker.source().finish_scan();
         while picker.source().matcher.tick(TICK_MS).running {}
         let items = picker.source().matcher.snapshot().item_count();
@@ -3682,7 +3863,7 @@ mod tests {
         picker.mode = Mode::Browse;
         picker.browser().enter();
         let start = Instant::now();
-        picker.switch_mode(1);
+        picker.toggle_browse();
         eprintln!(
             "switch_out_of_browse ms={:.3}",
             start.elapsed().as_secs_f64() * 1000.0
@@ -3974,17 +4155,102 @@ mod tests {
     }
 
     #[test]
-    fn mode_order_wraps_both_ways() {
-        assert_eq!(mode_index(Mode::Dirs), 0);
-        assert_eq!(mode_index(Mode::Browse), 4);
-        let next = |m: Mode, step: isize| {
-            let i = mode_index(m) as isize + step;
-            MODE_ORDER[i.rem_euclid(MODE_ORDER.len() as isize) as usize]
+    fn shift_tab_steps_through_the_searches_and_skips_browse() {
+        assert_eq!(next_search(Mode::Dirs), Mode::Files);
+        assert_eq!(next_search(Mode::Files), Mode::Recent);
+        assert_eq!(next_search(Mode::Recent), Mode::Favorites);
+        assert_eq!(next_search(Mode::Favorites), Mode::Dirs);
+        assert_eq!(first_search(Mode::Files), Mode::Files);
+        assert_eq!(first_search(Mode::Browse), Mode::Dirs);
+    }
+
+    #[test]
+    fn the_tab_hints_stay_on_a_narrow_screen() {
+        let root = crate::testing::temp_dir().join(format!("tadoru-hints-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        for width in [80u16, 120] {
+            for (mode, wanted) in [(Mode::Dirs, "Tab: browse"), (Mode::Browse, "Tab: dirs")] {
+                let mut picker = test_picker(root.clone(), mode);
+                let mut terminal =
+                    Terminal::new(ratatui::backend::TestBackend::new(width, 12)).unwrap();
+                terminal
+                    .draw(|frame| picker.render(frame.area(), frame))
+                    .unwrap();
+                let buffer = terminal.backend().buffer();
+                let bottom: String = (0..width).map(|x| buffer[(x, 11)].symbol()).collect();
+                // Whole, and first: what does not fit is left off the end
+                // rather than cut from the start of the line.
+                assert!(
+                    bottom.contains(&format!("─ {wanted}  ")),
+                    "{width} {mode:?}: {bottom}"
+                );
+            }
+        }
+        crate::testing::remove_tree(&root);
+    }
+
+    #[test]
+    fn tab_goes_between_the_search_and_browse() {
+        let root = crate::testing::temp_dir().join(format!("tadoru-tab-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("inner")).unwrap();
+        let tab = KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE);
+        let back_tab = KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT);
+        // The key hints on the bottom border, wide enough not to be cut.
+        let hints = |picker: &mut Picker| {
+            let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(160, 12)).unwrap();
+            terminal
+                .draw(|frame| picker.render(frame.area(), frame))
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            (0..160)
+                .map(|x| buffer[(x, 11)].symbol())
+                .collect::<String>()
         };
-        assert_eq!(next(Mode::Recent, 1), Mode::Favorites);
-        assert_eq!(next(Mode::Favorites, 1), Mode::Browse);
-        assert_eq!(next(Mode::Browse, 1), Mode::Dirs);
-        assert_eq!(next(Mode::Dirs, -1), Mode::Browse);
+
+        // Opened as cf: Tab pairs browse with files, not with dirs, so a
+        // file search is not lost to a look around.
+        let mut picker = test_picker(root.clone(), Mode::Files);
+        picker.handle_key(tab);
+        assert_eq!(picker.mode, Mode::Browse);
+        // Browse says where Tab goes back to.
+        let shown = hints(&mut picker);
+        assert!(shown.contains("Tab: files"), "{shown}");
+        picker.handle_key(tab);
+        assert_eq!(picker.mode, Mode::Files);
+        // The search names both ways out: browse, and the next search.
+        let shown = hints(&mut picker);
+        assert!(shown.contains("Tab: browse"), "{shown}");
+        assert!(shown.contains("S-Tab: recent"), "{shown}");
+
+        // Shift-Tab picks another search, and Tab then pairs browse with that.
+        picker.handle_key(back_tab);
+        assert_eq!(picker.mode, Mode::Recent);
+        picker.handle_key(back_tab);
+        picker.handle_key(back_tab);
+        assert_eq!(picker.mode, Mode::Dirs, "Shift-Tab stopped in browse");
+        picker.handle_key(tab);
+        assert_eq!(picker.mode, Mode::Browse);
+        // From browse, Shift-Tab goes back to that search too.
+        picker.handle_key(back_tab);
+        assert_eq!(picker.mode, Mode::Dirs);
+
+        // Opened straight into browse, Tab starts the directory search.
+        let mut picker = test_picker(root.clone(), Mode::Browse);
+        let shown = hints(&mut picker);
+        assert!(shown.contains("Tab: dirs"), "{shown}");
+        picker.handle_key(tab);
+        assert_eq!(picker.mode, Mode::Dirs);
+
+        // A click on a tab goes to that mode, and a search reached that way
+        // is the one Tab comes back to.
+        let mut picker = test_picker(root.clone(), Mode::Dirs);
+        picker.switch_to(Mode::Favorites);
+        picker.handle_key(tab);
+        assert_eq!(picker.mode, Mode::Browse);
+        picker.handle_key(tab);
+        assert_eq!(picker.mode, Mode::Favorites);
+
+        crate::testing::remove_tree(&root);
     }
 
     #[test]

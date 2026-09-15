@@ -5,7 +5,7 @@
 
 - フォルダ名を覚えている: `c openssl`
 - ファイル名だけ分かる: `cf Cargo.toml` で、そのファイルの親フォルダへ移動
-- 名前を知らず中を見たい: `c` を開き、Shift-Tab で browse に切り替える
+- 名前を知らず中を見たい: `c` を開き、Tab で browse に切り替える
 
 `c`・`cf`・browse・favorites は本体だけで動く。
 履歴を使う `z`・`zi`・recent には `zoxide` が要る（無い場合は画面で案内する）。
@@ -72,13 +72,16 @@ zoxide の `z` と `zi` には手を付けない。詳しくは[導入の詳細]
 
 ## 画面
 
-Tab でモードが dirs → files → recent → favorites → browse と切り替わる。
+Tab で検索と browse を行き来する。browse から戻る先は直前に使っていた検索で、
+`cf` で開いたなら files と browse の往復になる。検索の種類は Shift-Tab で
+dirs → files → recent → favorites と切り替える。上枠のモード名はクリックでも切り替わる。
 どのモードでも、文字を打てば絞り込み、Enter でそこへ cd。
 Esc は絞り込みを消し、空の状態でもう一度押すと終了する。Ctrl-C はいつでも終了する。
 
 | キー | 動作 |
 |---|---|
-| Tab / Shift-Tab | モード切替 |
+| Tab | 検索と browse を行き来する。戻る先は直前に使っていた検索 |
+| Shift-Tab | 検索の種類を切り替える。browse では検索に戻る |
 | Ctrl-B | 選択中のフォルダをお気に入りに登録・解除 |
 | Ctrl-P | 選択中の項目に対するアクションメニュー |
 | Ctrl-A | 走査が上限で止まったとき、上限を外して集め直す |

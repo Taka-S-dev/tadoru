@@ -119,4 +119,4 @@ tadoru 経由で移動したフォルダは、zoxide が使える場合に `zoxi
 
 tadoru は zoxide の `z` と `zi` を自分の定義で置き換える。`z` で移動しても `c -` で戻れるように
 移動元を記録するためで、`zi` は tadoru の一覧で選ぶ。zoxide の元の `z` と `zi` を使いたい場合は
-`--no-z` を付ける。その場合 recent は Tab で開く。
+`--no-z` を付ける。その場合 recent は `c` の画面で Shift-Tab を 2 回押すか、上枠の recent をクリックして開く。
