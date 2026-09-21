@@ -114,6 +114,11 @@ pub struct PickArgs {
     /// Print the only candidate without showing the picker.
     #[arg(long)]
     pub select_1: bool,
+    /// Run this action from the action menu on the chosen folder instead of
+    /// printing it, and exit with the action's exit code. For starting tadoru
+    /// where no shell function is waiting to cd, such as from a launcher.
+    #[arg(long, value_name = "ACTION")]
+    pub on_accept: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
@@ -163,6 +168,8 @@ enum Outcome {
     Path(PathBuf),
     Cancelled,
     Done,
+    /// An action ran in place of printing the path, and its exit code is ours.
+    Ran(u8),
 }
 
 const EXIT_CANCELLED: u8 = 1;
@@ -191,10 +198,7 @@ fn main() -> ExitCode {
             })
         }
         Command::Favorite { command } => favorite(command).map(|()| Outcome::Done),
-        Command::Pick(args) => pick(args).map(|p| match p {
-            Some(path) => Outcome::Path(path),
-            None => Outcome::Cancelled,
-        }),
+        Command::Pick(args) => pick(args),
         Command::Setup {
             shell,
             yes,
@@ -218,6 +222,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Ok(Outcome::Done) => ExitCode::SUCCESS,
+        Ok(Outcome::Ran(code)) => ExitCode::from(code),
         Ok(Outcome::Cancelled) => ExitCode::from(EXIT_CANCELLED),
         Err(err) => {
             eprintln!("tadoru: {err}");
@@ -248,7 +253,7 @@ fn favorite(command: FavoriteCommand) -> Result<(), Box<dyn std::error::Error>> 
     Ok(())
 }
 
-fn pick(mut args: PickArgs) -> Result<Option<PathBuf>, Box<dyn std::error::Error>> {
+fn pick(mut args: PickArgs) -> Result<Outcome, Box<dyn std::error::Error>> {
     if let Ok(query) = std::env::var("TADORU_QUERY") {
         args.query = query;
     }
@@ -261,7 +266,29 @@ fn pick(mut args: PickArgs) -> Result<Option<PathBuf>, Box<dyn std::error::Error
         return Err(format!("not a directory: {}", root.display()).into());
     }
     let config = config::Config::load()?;
-    picker::run(args, root, config)
+    let on_accept = args.on_accept.take();
+    // Looked up once before the screen opens, so a misspelt name is reported
+    // straight away instead of after a folder has been chosen. The picker only
+    // ever returns a folder, so the root stands in for whichever it will be.
+    if let Some(name) = &on_accept {
+        actions::find(name, &root)?;
+    }
+    let Some(path) = picker::run(args, root, config)? else {
+        return Ok(Outcome::Cancelled);
+    };
+    let Some(name) = on_accept else {
+        return Ok(Outcome::Path(path));
+    };
+    let action = actions::find(&name, &path)?;
+    if action.run_mode() == actions::RunMode::Detach {
+        action.execute_detached(&path)?;
+        return Ok(Outcome::Ran(0));
+    }
+    let status = action.execute_terminal(&path)?;
+    // Ended by a signal, there is no code to pass on.
+    Ok(Outcome::Ran(status.code().map_or(EXIT_ERROR, |code| {
+        u8::try_from(code).unwrap_or(u8::MAX)
+    })))
 }
 
 fn setup(

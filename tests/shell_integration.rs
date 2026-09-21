@@ -476,6 +476,62 @@ fn favorites_cli_and_picker_share_persistent_storage_without_zoxide() {
 }
 
 #[test]
+fn on_accept_runs_the_named_action_in_place_of_printing_the_folder() {
+    let fixture = Fixture::new();
+    let command = || {
+        let mut command = fixture.command(env!("CARGO_BIN_EXE_tadoru"));
+        command
+            .env_remove("TADORU_QUERY")
+            .env("APPDATA", &fixture.root)
+            .env("XDG_CONFIG_HOME", &fixture.root)
+            .env("HOME", &fixture.root);
+        command
+    };
+    check(
+        command()
+            .args(["favorite", "add"])
+            .arg(&fixture.destination)
+            .output()
+            .unwrap(),
+    );
+    // tadoru is the one program sure to be here on every platform. Asked for
+    // a root that is missing, it names the path and exits with 2, which shows
+    // both what the action was given and whose exit code comes back.
+    let config = fixture.root.join("config");
+    std::fs::create_dir_all(&config).unwrap();
+    std::fs::write(
+        config.join("actions.json"),
+        format!(
+            r#"{{"version":1,"actions":[{{"name":"Probe","program":"{}","args":["pick","--root","{{path}}/missing"]}}]}}"#,
+            env!("CARGO_BIN_EXE_tadoru").replace('\\', "/")
+        ),
+    )
+    .unwrap();
+    let pick = |name: &str| {
+        command()
+            .args(["pick", "--mode", "favorites", "--select-1", "--on-accept"])
+            .arg(name)
+            .output()
+            .unwrap()
+    };
+    let output = pick("probe");
+    let errors = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(2), "{errors}");
+    assert!(output.stdout.is_empty());
+    let missing = fixture.destination.join("missing");
+    assert!(
+        errors
+            .replace('/', "\\")
+            .contains(&missing.to_string_lossy().replace('/', "\\")),
+        "{errors}"
+    );
+    let output = pick("no such action");
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("no action named"));
+}
+
+#[test]
 fn action_config_can_be_created_and_validated_without_overwriting_customizations() {
     let fixture = Fixture::new();
     let mut command = fixture.command(env!("CARGO_BIN_EXE_tadoru"));

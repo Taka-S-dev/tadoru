@@ -74,6 +74,43 @@ messages and warnings go to standard error.
 
 Change directory only on `0`. A wrapper that does not tell `1` from `2` hides errors.
 
+| Option | Default | Meaning |
+|---|---|---|
+| `--mode <mode>` | `dirs` | `dirs`, `files`, `recent`, `favorites` or `browse`. The screen it opens in; Tab and Shift-Tab still change it |
+| `--query <text>` | empty | What the filter starts with. The environment variable `TADORU_QUERY` wins over it |
+| `--root <folder>` | current folder | Where the search starts |
+| `--select-1` | off | With exactly one candidate, print it without opening the screen |
+| `--on-accept <action>` | none | Run an action on the chosen folder instead of printing it; see below |
+
+## Starting without a shell
+
+A program cannot change the folder of the shell that started it, which is why `c` is a shell
+function. Started from a launcher, a shortcut or a terminal's own command line, tadoru has no shell
+waiting for the path, and printing it does nothing. For that, name an action to run on the chosen
+folder instead:
+
+```text
+tadoru pick --root C:\work --on-accept "Open shell here"
+```
+
+Enter then starts a shell in that folder, on the terminal tadoru was using, and tadoru exits with
+the shell's exit code. Any name from [the action menu](actions.md) works, including your own, so the
+same picker can open an editor or a new terminal tab. Upper and lower case are not told apart. Nothing
+is printed on standard output. A name that matches no action is reported before the screen opens.
+`c`, `cf`, `z` and `zi` never pass this option.
+
+Which terminal it opens in is up to whatever starts it. As the target of a Windows shortcut, for
+example:
+
+```text
+wt -w 0 nt -d C:\work tadoru pick --on-accept "Open shell here"
+wezterm-gui start --cwd C:\work -- tadoru pick --on-accept "Open shell here"
+```
+
+The first opens a tab in the Windows Terminal window used last, or a new window when there is none.
+Windows Terminal keeps a tab open when its program exits with anything but 0, which Esc does; set
+`closeOnExit` to `always` in the profile to have it close. The second opens a WezTerm window.
+
 ## PowerShell scripts on PATH
 
 To leave your profile alone, you can put `c.ps1` and the others on PATH instead.

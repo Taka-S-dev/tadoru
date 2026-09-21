@@ -64,6 +64,7 @@ pub enum Action {
     TempFolder,
     Copy,
     Editor,
+    Shell,
     Custom {
         definition: Definition,
         config_dir: PathBuf,
@@ -79,6 +80,7 @@ impl Action {
             Self::TempFolder => "Open temporary copies folder",
             Self::Copy => "Copy path",
             Self::Editor => "Open in VS Code",
+            Self::Shell => "Open shell here",
             Self::Custom { definition, .. } => &definition.name,
         }
     }
@@ -86,7 +88,7 @@ impl Action {
     /// The character that runs this action, if it has one.
     ///
     /// The menu is read, not typed at, so every letter comes from a word in
-    /// its own name and stays put as the list grows. Four names start with
+    /// its own name and stays put as the list grows. Five names start with
     /// Open, so `o` goes to the temporary copy, which has no other way in,
     /// and the plain one takes `d` for default.
     pub fn key(&self) -> Option<char> {
@@ -97,6 +99,7 @@ impl Action {
             Self::TempFolder => Some('t'),
             Self::Copy => Some('c'),
             Self::Editor => Some('v'),
+            Self::Shell => Some('s'),
             Self::Custom { definition, .. } => definition.key.as_deref().and_then(parse_key),
         }
     }
@@ -104,11 +107,18 @@ impl Action {
     pub fn run_mode(&self) -> RunMode {
         match self {
             Self::Custom { definition, .. } => definition.run,
+            Self::Shell => RunMode::Terminal,
             _ => RunMode::Detach,
         }
     }
 
     pub fn prepare(&self, target: &Path) -> Result<Command> {
+        if matches!(self, Self::Shell) {
+            let context = Context::new(target, Path::new(""))?;
+            let mut command = Command::new(default_shell());
+            command.current_dir(context.dir);
+            return Ok(command);
+        }
         let Self::Custom {
             definition,
             config_dir,
@@ -194,7 +204,7 @@ impl Action {
                 command.arg(target);
                 spawn_detached(command)
             }
-            Self::Custom { .. } => spawn_detached(self.prepare(target)?),
+            Self::Shell | Self::Custom { .. } => spawn_detached(self.prepare(target)?),
         }
         .map(|()| None)
     }
@@ -336,8 +346,21 @@ pub fn init() -> Result<PathBuf> {
     Ok(path)
 }
 
+/// The shell the environment names, so the built-in action needs no setting.
+/// Anyone who wants a different one writes an action for it.
+fn default_shell() -> OsString {
+    let (variable, fallback) = if cfg!(windows) {
+        ("ComSpec", "cmd.exe")
+    } else {
+        ("SHELL", "sh")
+    };
+    std::env::var_os(variable)
+        .filter(|shell| !shell.is_empty())
+        .unwrap_or_else(|| fallback.into())
+}
+
 fn defaults(target: &Path) -> Vec<Action> {
-    let mut actions = vec![Action::Reveal, Action::Editor, Action::Copy];
+    let mut actions = vec![Action::Reveal, Action::Editor, Action::Copy, Action::Shell];
     if target.is_file() {
         actions.push(Action::Open);
         actions.push(Action::TempCopy);
@@ -357,6 +380,23 @@ pub fn load(target: &Path) -> (Vec<Action>, Option<String>) {
         Ok(actions) => (actions, None),
         Err(error) => (defaults(target), Some(error)),
     }
+}
+
+/// The action `--on-accept` names. A mistake in the file is an error here
+/// rather than a fallback, because running a different action than the one
+/// asked for is worse than running none.
+pub fn find(name: &str, target: &Path) -> Result<Action> {
+    find_in(&config_path()?, name, target)
+}
+
+fn find_in(file: &Path, name: &str, target: &Path) -> Result<Action> {
+    // Searched from the end, so an action of your own wins over a built-in
+    // one of the same name, as its key does in the menu.
+    read(file, target)?
+        .into_iter()
+        .rev()
+        .find(|action| action.name().eq_ignore_ascii_case(name))
+        .ok_or_else(|| format!("no action named {name:?} applies to a folder"))
 }
 
 pub fn check() -> Result<PathBuf> {
@@ -839,6 +879,36 @@ mod tests {
         assert_eq!(read(&file, &fixture.0).unwrap()[0].name(), "folders");
         fs::write(&file, "invalid json").unwrap();
         assert!(read(&file, &target).err().unwrap().contains("actions.json"));
+    }
+
+    #[test]
+    fn an_action_is_found_by_name_and_your_own_wins_over_a_built_in() {
+        let fixture = Fixture::new();
+        let file = fixture.0.join("actions.json");
+        // With no file there are still the built-in ones to name.
+        let shell = find_in(&file, "open SHELL here", &fixture.0).unwrap();
+        assert!(matches!(shell, Action::Shell));
+        fs::write(&file, r#"{"version":1,"actions":[{"name":"Open shell here","program":"pwsh"},{"name":"files","program":"missing","target":"file"}]}"#).unwrap();
+        let own = find_in(&file, "Open shell here", &fixture.0).unwrap();
+        assert!(matches!(own, Action::Custom { .. }));
+        // The picker hands over a folder, so an action for files is not there to run.
+        let error = find_in(&file, "files", &fixture.0).err().unwrap();
+        assert!(error.contains("files"), "{error}");
+        fs::write(&file, "invalid json").unwrap();
+        assert!(find_in(&file, "Open shell here", &fixture.0).is_err());
+    }
+
+    #[test]
+    fn the_shell_starts_in_the_folder_or_beside_the_file() {
+        let fixture = Fixture::new();
+        let target = fixture.0.join("file.txt");
+        fs::write(&target, "").unwrap();
+        for path in [&fixture.0, &target] {
+            let command = Action::Shell.prepare(path).unwrap();
+            assert_eq!(command.get_current_dir(), Some(fixture.0.as_path()));
+            assert_eq!(command.get_args().count(), 0);
+        }
+        assert_eq!(Action::Shell.run_mode(), RunMode::Terminal);
     }
 
     #[test]

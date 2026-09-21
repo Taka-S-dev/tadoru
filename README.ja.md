@@ -72,6 +72,11 @@ zoxide の `z` と `zi` には手を付けない。詳しくは[導入の詳細�
 | `zi [query]` | zoxide の履歴を一覧から選んで cd |
 | `c -` | 直前に tadoru で移動する前に居たフォルダへ戻る（繰り返すと往復） |
 
+これらは `tadoru pick` を包むシェル関数で、`pick` が出力したパスにシェル側が cd する。
+ランチャーやショートカットから起動するとパスを受け取るシェルがいないので、選んだフォルダに対して
+実行するアクションを名前で指定する。`tadoru pick --on-accept "Open shell here"` なら、そこでシェルが開く。
+[シェルなしで起動する（英語）](docs/guide/setup.md#starting-without-a-shell)を参照。
+
 ## 画面
 
 Tab で検索と browse を行き来する。browse から戻る先は直前に使っていた検索で、

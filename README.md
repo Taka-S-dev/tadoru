@@ -74,6 +74,11 @@ For setting it up by hand, or to see exactly what `init` writes, read the
 | `zi [query]` | Pick a directory from the zoxide history and cd into it |
 | `c -` | Go back to where you were before the last move made with tadoru (again to return) |
 
+These are shell functions around `tadoru pick`, which prints the chosen path for the shell to cd
+to. From a launcher or a shortcut there is no shell waiting for it, so name an action to run on the
+chosen folder instead: `tadoru pick --on-accept "Open shell here"` starts a shell there. See
+[starting without a shell](docs/guide/setup.md#starting-without-a-shell).
+
 ## The screen
 
 Tab goes between the search and browse. Browse goes back to the search used last, so after

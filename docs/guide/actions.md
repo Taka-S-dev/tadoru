@@ -14,10 +14,11 @@ no modifier. You can also pick with the arrow keys and press Enter, or click.
 | f | Open in file manager |
 | v | Open in VS Code |
 | c | Copy path |
+| s | Open shell here |
 | d | Open with default application |
 | o | Open temporary copy (TEMP_) |
 
-Four of these start with Open, so `o` goes to the temporary copy, which has no other way in.
+Five of these start with Open, so `o` goes to the temporary copy, which has no other way in.
 Outside the menu, Ctrl-E opens the selection with its default application and Ctrl-O shows it in the
 file manager.
 
@@ -32,8 +33,15 @@ typed, so the next key applies to the whole list again. While you type, the left
 
 ## Built-in actions
 
-Without any configuration you get Open in file manager, Open in VS Code and Copy path; for a file,
-Open with default application is shown as well. Open in VS Code needs `code` on PATH.
+Without any configuration you get Open in file manager, Open in VS Code, Copy path and Open shell
+here; for a file, Open with default application is shown as well. Open in VS Code needs `code` on
+PATH.
+
+**Open shell here** starts a shell in the selected folder, or beside the selected file, on the same
+terminal. Leaving the shell brings you back to tadoru. The shell is the one the environment names:
+`ComSpec` on Windows and `SHELL` elsewhere. For a different one, add an action of your own such as
+`{ "name": "PowerShell here", "program": "pwsh", "args": ["-NoLogo"] }`; the working folder is
+already the selected one.
 
 For a file, **Open temporary copy (TEMP_)** creates a new folder inside the system temporary folder
 every time, copies the file there as `TEMP_<original name>`, and opens the copy with its default
