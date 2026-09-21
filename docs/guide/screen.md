@@ -176,11 +176,22 @@ level, here it widens the search by a level. The filter you typed stays. The sea
 the top of a drive, and the screen says so. recent and favorites do not scan a folder, so they show
 where their entries come from instead of a path.
 
-**Right** goes into the selected folder without leaving tadoru, where Enter would cd there and quit.
-It opens browse inside that folder; on a file, it opens the folder holding it with the file selected.
-Tab from there searches from that folder, so a favorite or a recent folder can be where the next
-search starts; Ctrl+← in the search puts the starting point back, as after any other move. A
-favorite whose folder has been deleted stays where it is, and the bottom of the screen says so.
+**Right** goes into the selection without leaving tadoru, where Enter would cd there and quit.
+From dirs and files it opens browse inside the folder; on a file, the folder holding it with the
+file selected. Tab from there goes back to the search, which then starts from that folder.
+
+Recent and favorites are lists of places to go rather than somewhere to be, so from them Right goes
+back to where you opened them from, now at the place you chose. Looking for something in dirs, open
+favorites, pick one and press Right: the dirs search carries on from that favorite. Opened from
+files it is files. The filter is cleared on the way, since what was typed picked the place out and
+would match nothing inside it; Ctrl+← brings back both it and where the search started. The key
+hints name where Right leads, as in `Right: dirs from it`.
+
+Opened from browse, Right goes back to browse and shows the place in its folder, selected, the way
+Tab shows a search result. Enter then goes to the favorite itself, rather than to whatever sorts
+first inside it, and Right again goes into it. A picker opened straight into a list, as `zi` does,
+has nowhere to go back to and does the same. A favorite whose folder has been deleted stays where it
+is, and the bottom of the screen says so.
 
 Once opened, browse keeps its folder, selection and filter as you switch modes, and clicking its mode
 name again does not reset them. After the search has moved, though, browse lines up with the new

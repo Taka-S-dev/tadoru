@@ -98,7 +98,7 @@ Esc clears the filter, and pressed again on an empty filter it quits. Ctrl-C alw
 | Ctrl-A | When a scan stopped at its limit, collect the rest |
 | F5 | Refresh the list and the preview |
 | Left | Widen the search by one level. In browse, go up a level |
-| Right | Go into the selected folder and keep going: in a search, including favorites and recent, it opens browse there. In browse, go down a level |
+| Right | Go into the selection and keep going. From dirs and files it opens browse there; from favorites and recent it goes back to where you opened them from, now at that place. In browse, go down a level |
 | Ctrl+← / Ctrl+→ | Step back or forward through the places visited: folders in browse, starting points in a search. Alt+← / Alt+→ do the same |
 
 The path under the top border is the folder the search covers. Click a step of it to search from

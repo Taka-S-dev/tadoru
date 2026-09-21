@@ -52,7 +52,9 @@ pub struct KeyMenu {
 }
 
 impl KeyMenu {
-    pub fn new(here: Mode) -> Self {
+    /// `origin` is the mode Right goes back to from recent and favorites,
+    /// which the row for it names.
+    pub fn new(here: Mode, origin: Mode) -> Self {
         let tab = |key, mode: Mode, shortcut| Entry {
             key,
             name: mode.label(),
@@ -75,10 +77,14 @@ impl KeyMenu {
             tab('b', Mode::Browse, "Tab"),
             press(
                 'l',
-                if browsing {
-                    "Go down a level"
-                } else {
-                    "Go into the selection"
+                match (here, origin) {
+                    (Mode::Browse, _) => "Go down a level",
+                    // A list of places is left for where it was opened from,
+                    // now at the place chosen.
+                    (Mode::Recent | Mode::Favorites, Mode::Dirs) => "Search dirs from it",
+                    (Mode::Recent | Mode::Favorites, Mode::Files) => "Search files from it",
+                    (Mode::Recent | Mode::Favorites, _) => "Show it in browse",
+                    _ => "Go into the selection",
                 },
                 "Right",
                 KeyCode::Right,
@@ -264,7 +270,7 @@ mod tests {
 
     #[test]
     fn a_plain_letter_runs_its_row_and_esc_or_ctrl_space_closes() {
-        let mut menu = KeyMenu::new(Mode::Dirs);
+        let mut menu = KeyMenu::new(Mode::Dirs, Mode::Dirs);
         assert!(matches!(
             menu.handle(key('s')),
             Decision::Run(Command::Go(Mode::Favorites))
@@ -289,7 +295,7 @@ mod tests {
 
     #[test]
     fn it_opens_on_the_current_tab_and_enter_runs_the_selection() {
-        let mut menu = KeyMenu::new(Mode::Recent);
+        let mut menu = KeyMenu::new(Mode::Recent, Mode::Browse);
         assert!(matches!(
             menu.handle(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
             Decision::Run(Command::Go(Mode::Recent))
@@ -308,7 +314,7 @@ mod tests {
 
     #[test]
     fn rows_name_the_shortcut_and_clicks_land_on_the_right_row() {
-        let mut menu = KeyMenu::new(Mode::Browse);
+        let mut menu = KeyMenu::new(Mode::Browse, Mode::Browse);
         let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
         terminal
             .draw(|frame| menu.render(frame.area(), frame))
@@ -325,6 +331,17 @@ mod tests {
         // Opened from browse, the two moves are named for what they do there.
         assert!(text(rows.y + 6).contains("l → Go down a level"));
         assert!(text(rows.y + 5).starts_with("─"));
+        // From favorites the same row says where Right goes back to.
+        let names = |here, origin| -> Vec<&str> {
+            KeyMenu::new(here, origin)
+                .entries
+                .iter()
+                .map(|entry| entry.name)
+                .collect()
+        };
+        assert!(names(Mode::Favorites, Mode::Files).contains(&"Search files from it"));
+        assert!(names(Mode::Favorites, Mode::Browse).contains(&"Show it in browse"));
+        assert!(names(Mode::Dirs, Mode::Dirs).contains(&"Go into the selection"));
 
         let click = |row: u16, column: u16| MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),

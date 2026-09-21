@@ -266,6 +266,9 @@ struct Picker {
     menu: Option<crate::action_menu::Menu>,
     /// The panel of keys that Ctrl-Space opens.
     keys: Option<crate::key_menu::KeyMenu>,
+    /// The last mode that shows a place: dirs, files or browse. Recent and
+    /// favorites list places to go, and Right in them goes back here.
+    origin: Mode,
     mouse_rows: (Rect, usize, usize),
     mouse_header: Rect,
     /// Clickable areas of the navigation buttons, empty outside browse mode.
@@ -340,6 +343,7 @@ pub fn run(args: PickArgs, root: PathBuf, config: Config) -> Result<Option<PathB
         pinned,
         menu: None,
         keys: None,
+        origin: place_mode(args.mode),
         mouse_rows: (Rect::default(), 0, 0),
         mouse_header: Rect::default(),
         mouse_nav: Vec::new(),
@@ -378,6 +382,15 @@ fn mode_index(mode: Mode) -> usize {
         .iter()
         .position(|&m| m == mode)
         .expect("known mode")
+}
+
+/// Where Right leads from a picker opened in `mode`. Opened straight into recent
+/// or favorites there is nowhere to go back to, so the place is browsed.
+fn place_mode(mode: Mode) -> Mode {
+    match mode {
+        Mode::Recent | Mode::Favorites => Mode::Browse,
+        place => place,
+    }
 }
 
 /// The search a picker opened in `mode` goes back to from browse. One opened
@@ -441,6 +454,34 @@ impl Picker {
         self.mode = Mode::Browse;
         self.browser().navigate_to(path);
         self.preview = None;
+    }
+
+    /// Right on a search result. From dirs and files that is a look inside, in
+    /// browse. Recent and favorites are lists of places to go rather than
+    /// somewhere to be, so from them it goes back to the mode they were opened
+    /// from, now at the place chosen: a search that was under way carries on
+    /// from the favorite.
+    ///
+    /// Going back to browse, the place is shown in its folder and selected,
+    /// as Tab shows a search result, rather than stepped into. Inside it the
+    /// highlight would be on the first row, which nobody chose, and Enter
+    /// would cd there instead of to the favorite.
+    fn go_into(&mut self, path: &Path) {
+        let listed = matches!(self.mode, Mode::Recent | Mode::Favorites);
+        let origin = self.origin;
+        if listed && origin == Mode::Browse {
+            self.mode = Mode::Browse;
+            self.browser().reveal(path);
+            self.preview = None;
+            return;
+        }
+        self.browse_at(path);
+        if listed {
+            self.switch_to(origin);
+            // What was typed picked the place out and would match nothing
+            // inside it. Going back brings it back with where it belonged.
+            self.set_query("");
+        }
     }
 
     /// Moves the scan root, remembering where the search came from.
@@ -533,6 +574,9 @@ impl Picker {
         }
         if entering != Mode::Browse {
             self.search_mode = entering;
+        }
+        if !matches!(leaving, Mode::Recent | Mode::Favorites) {
+            self.origin = leaving;
         }
 
         if leaving == Mode::Browse {
@@ -1027,7 +1071,7 @@ impl Picker {
         if key.code == KeyCode::Null
             || (key.code == KeyCode::Char(' ') && key.modifiers == KeyModifiers::CONTROL)
         {
-            self.keys = Some(crate::key_menu::KeyMenu::new(self.mode));
+            self.keys = Some(crate::key_menu::KeyMenu::new(self.mode, self.origin));
             return Action::Continue;
         }
         // Ctrl does the same as Alt here. Terminals that use Alt with the
@@ -1203,7 +1247,7 @@ impl Picker {
                     Some(path) if !path.exists() => {
                         self.set_notice(format!("Not there any more: {}", path.display()));
                     }
-                    Some(path) => self.browse_at(&path),
+                    Some(path) => self.go_into(&path),
                     None => {}
                 }
                 Action::Continue
@@ -1323,6 +1367,14 @@ impl Picker {
                         "^Space: keys",
                         &format!("S-Tab: {}", next_search(mode).label()),
                         "Enter: cd",
+                        // Named by where it leads, which from a list of
+                        // places is wherever that list was opened from.
+                        &match (mode, self.origin) {
+                            (Mode::Recent | Mode::Favorites, Mode::Dirs | Mode::Files) => {
+                                format!("Right: {} from it", self.origin.label())
+                            }
+                            _ => "Right: browse it".to_string(),
+                        },
                         "Esc: clear/exit",
                         "^P: actions",
                         "^B: pin",
@@ -2517,6 +2569,7 @@ mod tests {
             pinned: crate::favorites::Index::default(),
             menu: None,
             keys: None,
+            origin: place_mode(mode),
             browser_root: PathBuf::new(),
             search_mode: first_search(mode),
             unlimited: false,
@@ -3657,6 +3710,44 @@ mod tests {
         assert_eq!(picker.root, inner);
         drop(picker);
 
+        // Favorites and recent are lists of places to go, so from them Right
+        // goes back to where they were opened from, now at the place chosen.
+        let mut picker = test_picker(root.clone(), Mode::Files);
+        picker.switch_to(Mode::Favorites);
+        assert_eq!(picker.origin, Mode::Files);
+        picker.query = "inn".into();
+        picker.go_into(&inner);
+        assert_eq!(picker.mode, Mode::Files);
+        assert_eq!(picker.root, inner);
+        // The filter that found the favorite is not carried into it, and going
+        // back restores it along with where the search started.
+        assert_eq!(picker.query, "");
+        picker.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL));
+        assert_eq!(picker.root, root);
+        assert_eq!(picker.query, "inn");
+        // Through recent on the way to favorites, it is still files it came from.
+        picker.switch_to(Mode::Recent);
+        picker.switch_to(Mode::Favorites);
+        assert_eq!(picker.origin, Mode::Files);
+        drop(picker);
+
+        // Opened from browse it is browse that carries on, and a picker opened
+        // straight into a list has nowhere to go back to, so it browses too.
+        // There the favorite is shown in its folder and selected, so Enter
+        // goes to it rather than to whatever sorts first inside it.
+        for start in [Mode::Browse, Mode::Favorites] {
+            let mut picker = test_picker(root.clone(), start);
+            picker.switch_to(Mode::Favorites);
+            picker.go_into(&inner);
+            assert_eq!(picker.mode, Mode::Browse, "{start:?}");
+            assert_eq!(picker.browser().cwd, root.join("only"));
+            assert_eq!(picker.browser().target(), inner);
+            // Right again goes into it.
+            picker.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+            assert_eq!(picker.browser().cwd, inner);
+            drop(picker);
+        }
+
         // A file opens the folder holding it, with the file selected. Ctrl-L
         // stands in for Right here as it does in browse.
         let mut picker = test_picker(root.clone(), Mode::Files);
@@ -4420,9 +4511,14 @@ mod tests {
                 let buffer = terminal.backend().buffer();
                 let bottom: String = (0..width).map(|x| buffer[(x, 11)].symbol()).collect();
                 // Whole, and first: what does not fit is left off the end
-                // rather than cut from the start of the line.
+                // rather than cut from the start of the line. Nothing but
+                // border comes before it, however much or little of that
+                // the hints leave room for.
+                let (before, _) = bottom
+                    .split_once(&format!(" {wanted}  "))
+                    .unwrap_or_else(|| panic!("{width} {mode:?}: {bottom}"));
                 assert!(
-                    bottom.contains(&format!("─ {wanted}  ")),
+                    before.chars().all(|ch| ch == '╰' || ch == '─'),
                     "{width} {mode:?}: {bottom}"
                 );
             }
