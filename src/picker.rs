@@ -1214,16 +1214,22 @@ impl Picker {
         }
     }
 
+    /// The screen, with the action menu floating over it while one is open.
+    /// The list stays in view under the menu, so the item the actions are
+    /// about to run on can still be seen.
     fn render(&mut self, area: Rect, frame: &mut ratatui::Frame) {
+        self.render_screen(area, frame);
+        if let Some(menu) = &mut self.menu {
+            menu.render(area, frame);
+        }
+    }
+
+    fn render_screen(&mut self, area: Rect, frame: &mut ratatui::Frame) {
         self.mouse_rows = (Rect::default(), 0, 0);
         self.mouse_header = Rect::default();
         self.mouse_nav.clear();
         self.mouse_crumbs.clear();
         self.mouse_paths.clear();
-        if let Some(menu) = &mut self.menu {
-            menu.render(area, frame);
-            return;
-        }
         if self.mode == Mode::Browse {
             self.render_browse(area, frame);
             return;

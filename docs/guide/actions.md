@@ -1,13 +1,19 @@
 # The action menu
 
-A screen for handing the selected file or folder to another application or script.
+A menu for handing the selected file or folder to another application or script.
 tadoru itself does not copy, delete or rename; handing things over is as far as it goes.
 
 **Ctrl-P** opens the actions for the selected file or folder. They run on what was selected when the
 menu opened. Esc or Ctrl-P goes back.
 
-When the menu opens it waits for a key: press the letter at the left of a row to run that action, with
-no modifier. You can also pick with the arrow keys and press Enter, or click.
+The menu is a panel at the bottom right, over the preview, so the list and the item the actions run
+on stay in view. It grows to fit its longest action, above a minimum width, and its first line
+names the item; a long path keeps its end, where the name is. A terminal too small for the panel
+gives the menu the whole screen.
+
+When the menu opens it waits for a key: each row reads `f → Open in file manager`, and pressing the
+letter at the left of the arrow runs that action, with no modifier. You can also pick with the arrow
+keys and press Enter, or click.
 
 | Key | Action |
 |---|---|

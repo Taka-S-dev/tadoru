@@ -6,10 +6,26 @@ use nucleo::{Config, Matcher, Utf32Str};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Wrap};
 use unicode_width::UnicodeWidthStr;
 
 use crate::actions::{self, Action, RunMode};
+
+/// Joins a key to what it runs, as in `f → Open in file manager`.
+pub(crate) const ARROW: &str = " → ";
+/// The key is what gets pressed, so it is the bright part of a row, and the
+/// arrow only joins it to the name.
+pub(crate) const KEY_STYLE: Style = Style::new().fg(Color::Indexed(110));
+pub(crate) const ARROW_STYLE: Style = Style::new().fg(Color::Indexed(240));
+pub(crate) const SELECTED_STYLE: Style = Style::new()
+    .fg(Color::White)
+    .bg(Color::Indexed(236))
+    .add_modifier(Modifier::BOLD);
+/// The key column while the menu waits for a key: one character and the arrow.
+const KEY_WIDTH: usize = 4;
+/// The same column while filtering, where the keys need Alt: `alt+f → `.
+const FILTER_KEY_WIDTH: usize = 8;
+const TERMINAL_SUFFIX: &str = "  [terminal]";
 
 pub enum Decision {
     Stay,
@@ -221,25 +237,61 @@ impl Menu {
         false
     }
 
-    pub fn render(&mut self, area: Rect, frame: &mut ratatui::Frame) {
-        self.mouse_rows = Rect::default();
-        self.mouse_tools = Rect::default();
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .title(" Actions ")
-            .title_bottom(if self.filtering {
-                " Click / Enter: run  Tab: back to keys  Esc / Ctrl-P: close "
-            } else {
-                " Click / Enter: run  Tab: filter  Esc / Ctrl-P: close "
-            });
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-        let head = match (&self.error, &self.hint) {
+    /// Lines above the list for an error in actions.json, or the pointer to
+    /// the command that writes one.
+    fn head(&self) -> u16 {
+        match (&self.error, &self.hint) {
             (Some(_), _) => 3,
             (None, Some(_)) => 2,
             _ => 0,
-        };
+        }
+    }
+
+    /// Where the menu floats: the bottom right of `area`, as wide as its
+    /// longest row and as tall as its list.
+    ///
+    /// The right is where the preview is, so the list on the left, with the
+    /// item the actions are about to run on, stays in view. Sized by every
+    /// action rather than the ones a filter leaves, so typing does not make
+    /// the panel jump. A screen too small to float in gets the whole area.
+    fn panel(&self, area: Rect) -> Rect {
+        const MIN_WIDTH: u16 = 46;
+        let widest = self
+            .items
+            .iter()
+            .chain(&self.tools)
+            .map(|action| {
+                action.name().width()
+                    + if action.run_mode() == RunMode::Terminal {
+                        TERMINAL_SUFFIX.width()
+                    } else {
+                        0
+                    }
+            })
+            .max()
+            .unwrap_or(0);
+        // Marker, the key column at its widest, the name, a space and borders.
+        let width = ((2 + FILTER_KEY_WIDTH + widest + 1 + 2) as u16).max(MIN_WIDTH);
+        let tools = if self.tools.is_empty() { 0 } else { 2 };
+        let height = 2 + 2 + self.head() + (self.items.len() as u16).max(1) + tools;
+        float(area, width, height)
+    }
+
+    pub fn render(&mut self, area: Rect, frame: &mut ratatui::Frame) {
+        self.mouse_rows = Rect::default();
+        self.mouse_tools = Rect::default();
+        let area = self.panel(area);
+        let inner = open_panel(
+            area,
+            frame,
+            " Actions ",
+            if self.filtering {
+                " Enter: run  Tab: keys  Esc: close "
+            } else {
+                " Enter: run  Tab: filter  Esc: close "
+            },
+        );
+        let head = self.head();
         // A rule above the zone, so it reads as separate from the list rather
         // than as its last row. It follows the list instead of sitting at the
         // foot of the window, which in a full-height menu put it far enough
@@ -277,8 +329,8 @@ impl Menu {
                 .key()
                 .filter(|&ch| self.tool_owner(ch).is_some())
             {
-                Some(ch) => format!("{ch}  "),
-                None => "   ".to_string(),
+                Some(ch) => format!("{ch}{ARROW}"),
+                None => " ".repeat(KEY_WIDTH),
             };
             frame.render_widget(
                 Paragraph::new(Line::from(vec![
@@ -292,8 +344,11 @@ impl Menu {
             self.mouse_tools = line;
         }
         frame.render_widget(
-            Paragraph::new(self.target.display().to_string())
-                .style(Style::default().fg(Color::Cyan)),
+            Paragraph::new(tail(
+                &self.target.display().to_string(),
+                target.width as usize,
+            ))
+            .style(Style::default().fg(Color::Cyan)),
             target,
         );
         if self.filtering {
@@ -307,11 +362,19 @@ impl Menu {
         } else {
             // Say which keys the list is listening for. Without this the rows
             // look like plain labels and the letters beside them like noise.
+            const WAITING: &str = "Press a key to run.";
             frame.render_widget(
-                Paragraph::new("Press a key to run.  Tab: filter")
-                    .style(Style::default().fg(Color::DarkGray)),
+                Paragraph::new(WAITING).style(Style::default().fg(Color::DarkGray)),
                 prompt,
             );
+            // The picker underneath put the cursor in its own prompt, where
+            // typing no longer goes while the menu is open.
+            if prompt.width > 0 && prompt.height > 0 {
+                frame.set_cursor_position((
+                    prompt.x + (WAITING.width() as u16 + 1).min(prompt.width - 1),
+                    prompt.y,
+                ));
+            }
         }
         if let Some(error) = &self.error {
             frame.render_widget(
@@ -351,35 +414,35 @@ impl Menu {
             .iter()
             .any(|&(_, index)| self.shown_key(index).is_some());
         let (label, width): (fn(char) -> String, usize) = if self.filtering {
-            (|ch| format!("alt+{ch}  "), 7)
+            (|ch| format!("alt+{ch}"), FILTER_KEY_WIDTH)
         } else {
-            (|ch| format!("{ch}  "), 3)
+            (|ch| ch.to_string(), KEY_WIDTH)
         };
         let items: Vec<ListItem> = shown
             .iter()
             .map(|&(row, index)| {
                 let action = &self.items[index];
                 let suffix = if action.run_mode() == RunMode::Terminal {
-                    "  [terminal]"
+                    TERMINAL_SUFFIX
                 } else {
                     ""
                 };
-                let key = match (keyed, self.shown_key(index)) {
-                    (true, Some(ch)) => label(ch),
-                    (true, None) => " ".repeat(width),
-                    (false, _) => String::new(),
+                // The key, an arrow, the name: the key is what gets pressed, so
+                // it is the bright part, and the arrow only joins the two.
+                let (key, arrow) = match (keyed, self.shown_key(index)) {
+                    (true, Some(ch)) => (label(ch), ARROW.to_string()),
+                    (true, None) => (String::new(), " ".repeat(width)),
+                    (false, _) => (String::new(), String::new()),
                 };
                 let line = Line::from(vec![
                     Span::raw(if row == self.selected { "▌ " } else { "  " }),
-                    Span::styled(key, Style::default().fg(Color::DarkGray)),
+                    Span::styled(key, KEY_STYLE),
+                    Span::styled(arrow, ARROW_STYLE),
                     Span::raw(action.name().to_string()),
                     Span::styled(suffix, Style::default().fg(Color::DarkGray)),
                 ]);
                 let style = if row == self.selected {
-                    Style::default()
-                        .fg(Color::White)
-                        .bg(Color::Indexed(236))
-                        .add_modifier(Modifier::BOLD)
+                    SELECTED_STYLE
                 } else {
                     Style::default()
                 };
@@ -390,10 +453,110 @@ impl Menu {
     }
 }
 
+/// Where a panel of this size floats: the bottom right of `area`, inside the
+/// picker's own border. A screen too small to float in gives it the whole area.
+pub(crate) fn float(area: Rect, width: u16, height: u16) -> Rect {
+    if area.width < width + 4 || area.height < height + 2 {
+        return area;
+    }
+    Rect {
+        x: area.right() - width - 2,
+        y: area.bottom() - height - 1,
+        width,
+        height,
+    }
+}
+
+/// Clears `area`, draws the frame every floating panel shares and returns the
+/// space inside it. The picker is still drawn underneath, and the border has a
+/// colour of its own so the panel is not taken for part of it.
+pub(crate) fn open_panel(
+    area: Rect,
+    frame: &mut ratatui::Frame,
+    title: &'static str,
+    footer: &'static str,
+) -> Rect {
+    frame.render_widget(Clear, area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::Indexed(109)))
+        .title(title)
+        .title_bottom(Line::from(footer).centered());
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    inner
+}
+
+/// The end of `text` that fits in `width` columns, led by an ellipsis when
+/// something was cut. The name at the end of a path is the part that says
+/// which item the actions run on, so that is the end that is kept.
+fn tail(text: &str, width: usize) -> String {
+    if text.width() <= width {
+        return text.to_string();
+    }
+    let mut kept = String::new();
+    let mut used = 1;
+    for ch in text.chars().rev() {
+        let w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        if used + w > width {
+            break;
+        }
+        used += w;
+        kept.insert(0, ch);
+    }
+    format!("…{kept}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use ratatui::{Terminal, backend::TestBackend};
+
+    #[test]
+    fn the_menu_floats_at_the_bottom_right_and_leaves_the_list_in_view() {
+        let mut menu = menu_of(vec![Action::Reveal, Action::Copy]);
+        let area = Rect::new(0, 0, 120, 30);
+        let panel = menu.panel(area);
+        // Inside the picker's own border, against its right and bottom edges.
+        assert_eq!(panel.right(), area.right() - 2);
+        assert_eq!(panel.bottom(), area.bottom() - 1);
+        // Two actions, the target and prompt lines, the zone below and borders.
+        assert_eq!(panel.height, 2 + 2 + 2 + 2);
+        assert!(panel.width < area.width / 2, "{panel:?}");
+
+        // What is already on screen to the left of it is not painted over.
+        let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+        terminal
+            .draw(|frame| {
+                frame.render_widget(Paragraph::new("x".repeat(120)), Rect::new(0, 25, 120, 1));
+                menu.render(frame.area(), frame);
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        assert_eq!(buffer[(0, 25)].symbol(), "x");
+        assert_eq!(buffer[(panel.x - 1, 25)].symbol(), "x");
+        assert_ne!(buffer[(panel.x + 1, 25)].symbol(), "x");
+
+        // The panel keeps its size while a filter hides rows, so it does not
+        // jump about under the pointer.
+        menu.handle(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        menu.handle(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE));
+        assert!(menu.visible.is_empty());
+        assert_eq!(menu.panel(area), panel);
+
+        // Without room to float it takes the whole area, as a small terminal needs.
+        let small = Rect::new(0, 0, 40, 9);
+        assert_eq!(menu.panel(small), small);
+    }
+
+    #[test]
+    fn a_long_target_keeps_its_name_in_sight() {
+        assert_eq!(tail("short", 10), "short");
+        assert_eq!(tail(r"C:\work\project\report.xlsx", 12), "…report.xlsx");
+        // Wide characters are counted by the columns they take.
+        assert_eq!(tail("資料/日本語.txt", 11), "…日本語.txt");
+    }
 
     fn menu_of(items: Vec<Action>) -> Menu {
         let visible = (0..items.len()).collect();
@@ -431,9 +594,9 @@ mod tests {
         };
         // Three actions on rows 3 to 5, then the zone. Pinning it to the foot
         // of the window instead left eighteen blank rows between the two.
-        assert_eq!(row(5), "  c  Copy path");
+        assert_eq!(row(5), "  c → Copy path");
         assert_eq!(row(6), "─".repeat(44));
-        assert_eq!(row(7), "  t  Open temporary copies folder");
+        assert_eq!(row(7), "  t → Open temporary copies folder");
         assert_eq!(row(8), "");
     }
 
@@ -454,7 +617,7 @@ mod tests {
         }
         // A blank line keeps it from reading as the last row of the list.
         assert_eq!(row(&terminal, 5), "─".repeat(44));
-        assert_eq!(row(&terminal, 6), "  t  Open temporary copies folder");
+        assert_eq!(row(&terminal, 6), "  t → Open temporary copies folder");
 
         // The filter never hides it, because it is not one of the items.
         menu.handle(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
@@ -468,7 +631,7 @@ mod tests {
         // With nothing matching, the list keeps one row for its message and
         // the zone stays right under it.
         assert_eq!(row(&terminal, 4), "─".repeat(44));
-        assert_eq!(row(&terminal, 5), "  t  Open temporary copies folder");
+        assert_eq!(row(&terminal, 5), "  t → Open temporary copies folder");
 
         // Its key runs it from either mode, and a click on it does too.
         assert!(matches!(
@@ -615,9 +778,9 @@ mod tests {
             })
             .collect();
         // The names line up because the row without a key is padded to match.
-        assert_eq!(rows[0], "▌ f  Open in file manager");
-        assert_eq!(rows[1], "     Copy path");
-        assert_eq!(rows[2], "  c  Compare");
+        assert_eq!(rows[0], "▌ f → Open in file manager");
+        assert_eq!(rows[1], "      Copy path");
+        assert_eq!(rows[2], "  c → Compare");
 
         // With the filter focused the same keys need Alt, and say so.
         menu.handle(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
@@ -632,7 +795,7 @@ mod tests {
                 .trim_end()
                 .to_string()
         };
-        assert_eq!(row(3), "▌ alt+f  Open in file manager");
+        assert_eq!(row(3), "▌ alt+f → Open in file manager");
         assert_eq!(row(2), ">");
     }
 
