@@ -170,7 +170,7 @@ cargo test --release --bin tadoru benchmark_mode_switch -- --ignored --nocapture
 ```
 
 On a Windows x86_64 release build, collecting up to the default limit of 200,000 items from `C:\`
-took about 0.3 seconds from the start of the scan to the final sort order in files, and 2 to 3
+took 0.3 to 0.4 seconds from the start of the scan to the final sort order in files, and 2 to 3
 seconds in dirs. dirs collects 200,000 folders and nothing else, so it walks a wider part of the
 drive. Updating the filter to `src` took around 10 ms. The numbers vary between runs and are not
 precise claims. The scan runs in the background, and the list can be used before it finishes.
