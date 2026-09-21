@@ -151,6 +151,12 @@ level, here it widens the search by a level. The filter you typed stays. The sea
 the top of a drive, and the screen says so. recent and favorites do not scan a folder, so they show
 where their entries come from instead of a path.
 
+**Right** goes into the selected folder without leaving tadoru, where Enter would cd there and quit.
+It opens browse inside that folder; on a file, it opens the folder holding it with the file selected.
+Tab from there searches from that folder, so a favorite or a recent folder can be where the next
+search starts; Ctrl+← in the search puts the starting point back, as after any other move. A
+favorite whose folder has been deleted stays where it is, and the bottom of the screen says so.
+
 Once opened, browse keeps its folder, selection and filter as you switch modes, and clicking its mode
 name again does not reset them. After the search has moved, though, browse lines up with the new
 starting point, since coming back to an old folder while the search looks elsewhere would look like a

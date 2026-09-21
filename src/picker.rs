@@ -430,6 +430,16 @@ impl Picker {
         self.browser.get_or_insert_with(|| Browser::new(root))
     }
 
+    /// Leaves a search for browse at `path`: inside a folder, or beside a file
+    /// with the file selected. Tab from there searches from that folder, so a
+    /// favorite or a search result is a way into the rest of the picker and
+    /// not only a place to cd to.
+    fn browse_at(&mut self, path: &Path) {
+        self.mode = Mode::Browse;
+        self.browser().navigate_to(path);
+        self.preview = None;
+    }
+
     /// Moves the scan root, remembering where the search came from.
     fn set_root(&mut self, root: PathBuf) {
         if root == self.root {
@@ -731,9 +741,7 @@ impl Picker {
                 return;
             }
             if self.mode != Mode::Browse {
-                self.mode = Mode::Browse;
-                self.browser().navigate_to(&path);
-                self.preview = None;
+                self.browse_at(&path);
                 return;
             }
             if path == self.browser().cwd {
@@ -1124,6 +1132,20 @@ impl Picker {
                 self.navigate(Nav::Up);
                 Action::Continue
             }
+            // The same key that goes down a level in browse, and the same move
+            // as a click on the preview. Enter would cd there and quit.
+            (KeyCode::Right, _) | (KeyCode::Char('l'), true) => {
+                match self.selected_path() {
+                    // Favorites keeps folders that have been deleted, so they
+                    // can be unpinned, and browse has nowhere to open for one.
+                    Some(path) if !path.exists() => {
+                        self.set_notice(format!("Not there any more: {}", path.display()));
+                    }
+                    Some(path) => self.browse_at(&path),
+                    None => {}
+                }
+                Action::Continue
+            }
             (KeyCode::Char(c), false) if crate::keys::is_typed_text(&key) => {
                 let mut q = self.query.clone();
                 q.push(c);
@@ -1229,6 +1251,7 @@ impl Picker {
                         "Tab: browse",
                         &format!("S-Tab: {}", next_search(mode).label()),
                         "Enter: cd",
+                        "Right: go in",
                         "Esc: clear/exit",
                         "^P: actions",
                         "^B: pin",
@@ -3451,6 +3474,65 @@ mod tests {
         assert_eq!(picker.browser().cwd, child);
         drop(picker);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn right_goes_into_the_selection_and_tab_searches_from_there() {
+        let root = crate::testing::temp_dir().join(format!("tadoru-right-{}", std::process::id()));
+        let inner = root.join("only/inner");
+        std::fs::create_dir_all(&inner).unwrap();
+        std::fs::write(root.join("only/note.txt"), "").unwrap();
+        let right = KeyEvent::new(KeyCode::Right, KeyModifiers::NONE);
+
+        // A folder is stepped into. Enter would have ended the session there.
+        let mut picker = test_picker(root.clone(), Mode::Dirs);
+        picker.set_query("inner");
+        picker.source().finish_scan();
+        while picker.source().matcher.tick(TICK_MS).running {}
+        assert!(matches!(picker.handle_key(right), Action::Continue));
+        assert_eq!(picker.mode, Mode::Browse);
+        assert_eq!(picker.browser().cwd, inner);
+        // Tab goes back to the search, which now covers the folder reached.
+        picker.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        assert_eq!(picker.mode, Mode::Dirs);
+        assert_eq!(picker.root, inner);
+        drop(picker);
+
+        // A file opens the folder holding it, with the file selected. Ctrl-L
+        // stands in for Right here as it does in browse.
+        let mut picker = test_picker(root.clone(), Mode::Files);
+        picker.source().finish_scan();
+        while picker.source().matcher.tick(TICK_MS).running {}
+        picker.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
+        assert_eq!(picker.mode, Mode::Browse);
+        assert_eq!(picker.browser().cwd, root.join("only"));
+        assert_eq!(
+            picker.browser().selected_path(),
+            Some(root.join("only/note.txt"))
+        );
+        drop(picker);
+
+        // With nothing selected the key does nothing.
+        let mut picker = test_picker(root.clone(), Mode::Dirs);
+        picker.set_query("no such folder");
+        picker.source().finish_scan();
+        while picker.source().matcher.tick(TICK_MS).running {}
+        picker.handle_key(right);
+        assert_eq!(picker.mode, Mode::Dirs);
+        drop(picker);
+
+        // A folder deleted since it was listed, as a favorite can be, is
+        // reported and the search stays where it was.
+        let mut picker = test_picker(root.clone(), Mode::Dirs);
+        picker.set_query("inner");
+        picker.source().finish_scan();
+        while picker.source().matcher.tick(TICK_MS).running {}
+        std::fs::remove_dir(&inner).unwrap();
+        picker.handle_key(right);
+        assert_eq!(picker.mode, Mode::Dirs);
+        assert!(picker.notice.as_deref().unwrap().contains("inner"));
+        drop(picker);
+        crate::testing::remove_tree(&root);
     }
 
     #[test]
