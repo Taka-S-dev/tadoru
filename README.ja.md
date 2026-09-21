@@ -167,7 +167,7 @@ cargo test --release --bin tadoru benchmark_mode_switch -- --ignored --nocapture
 ```
 
 手元の Windows x86_64 / release ビルドで `C:\` を対象に既定の上限の 20 万件まで集めると、
-走査から並び順の確定まで files は 0.3〜0.4 秒、dirs は 2〜3 秒だった。
+走査から並び順の確定まで files は 0.3〜0.4 秒、dirs は 2 秒前後だった。
 dirs はフォルダだけを 20 万件集めるため、ドライブのより広い範囲を歩く。
 `src` への絞り込みの更新は 10 ms 前後。実行ごとに動くので、
 狭い範囲を主張できる数字ではない。走査はバックグラウンドで進み、一覧は途中から使える。
