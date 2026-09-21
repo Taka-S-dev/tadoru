@@ -91,6 +91,7 @@ Esc clears the filter, and pressed again on an empty filter it quits. Ctrl-C alw
 |---|---|
 | Tab | Go between the search and browse, back to the search used last |
 | Shift-Tab | Change to the next kind of search. In browse, go back to the search |
+| Ctrl-D / Ctrl-F / Ctrl-R / Ctrl-S | Go straight to dirs, files, recent or favorites (S for starred) |
 | Ctrl-B | Pin or unpin the selected folder as a favorite |
 | Ctrl-P | Open the action menu for the selected item |
 | Ctrl-A | When a scan stopped at its limit, collect the rest |

@@ -89,6 +89,7 @@ Esc は絞り込みを消し、空の状態でもう一度押すと終了する�
 |---|---|
 | Tab | 検索と browse を行き来する。戻る先は直前に使っていた検索 |
 | Shift-Tab | 検索の種類を切り替える。browse では検索に戻る |
+| Ctrl-D / Ctrl-F / Ctrl-R / Ctrl-S | dirs・files・recent・favorites へ直接切り替える（S は ★ の starred） |
 | Ctrl-B | 選択中のフォルダをお気に入りに登録・解除 |
 | Ctrl-P | 選択中の項目に対するアクションメニュー |
 | Ctrl-A | 走査が上限で止まったとき、上限を外して集め直す |

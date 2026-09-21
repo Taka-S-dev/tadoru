@@ -135,8 +135,12 @@ between most, so one key joins the two. Browse's key hints name the search Tab g
 
 **Shift-Tab** changes the kind of search, in the order dirs → files → recent → favorites. In browse
 it goes back to the search, as Tab does. Clicking a mode name on the top border goes straight to
-that mode. The tabs there are laid out as `[dirs|files|recent|favorites]  [browse]`, keeping the
-four searches Shift-Tab steps through apart from browse.
+that mode, and so does **Ctrl** with the search's letter: Ctrl-D dirs, Ctrl-F files, Ctrl-R recent
+and Ctrl-S favorites, the starred ones. Shift-Tab only steps forward, so from dirs it takes three
+presses to reach favorites, and Ctrl-S takes one. Browse already has a key of its own in Tab. These
+are Ctrl with a letter rather than Alt with a digit because a terminal may keep the second for
+switching its own tabs. The tabs there are laid out as `[dirs|files|recent|favorites]  [browse]`,
+keeping the four searches Shift-Tab steps through apart from browse.
 
 Browse opens the folder being searched, with the item selected in dirs or files still selected. It
 does not go into the selected folder: that would replace the list you had just been reading, and in

@@ -1003,6 +1003,26 @@ impl Picker {
             });
             return Action::Continue;
         }
+        // Straight to a search by its letter; favorites are the starred ones.
+        // Shift-Tab only steps forward, so by that key alone favorites is
+        // three presses from dirs and four from browse. Ctrl with a letter
+        // rather than Alt with a digit, which a terminal may keep for
+        // switching its own tabs.
+        // AltGr arrives as Ctrl+Alt on Windows and types a character.
+        if key.modifiers.contains(KeyModifiers::CONTROL)
+            && !key.modifiers.contains(KeyModifiers::ALT)
+            && let KeyCode::Char(letter) = key.code
+            && let Some(mode) = match letter.to_ascii_lowercase() {
+                'd' => Some(Mode::Dirs),
+                'f' => Some(Mode::Files),
+                'r' => Some(Mode::Recent),
+                's' => Some(Mode::Favorites),
+                _ => None,
+            }
+        {
+            self.switch_to(mode);
+            return Action::Continue;
+        }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         match (key.code, ctrl) {
             (KeyCode::Char('p'), true) => {
@@ -1250,6 +1270,7 @@ impl Picker {
                     &[
                         "Tab: browse",
                         &format!("S-Tab: {}", next_search(mode).label()),
+                        "^D/F/R/S: mode",
                         "Enter: cd",
                         "Right: go in",
                         "Esc: clear/exit",
@@ -1496,6 +1517,7 @@ impl Picker {
                 &fit_hints(
                     &[
                         &format!("Tab: {}", self.search_mode.label()),
+                        "^D/F/R/S: mode",
                         "Enter: cd",
                         "Left: up",
                         "Right: enter",
@@ -3474,6 +3496,50 @@ mod tests {
         assert_eq!(picker.browser().cwd, child);
         drop(picker);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn ctrl_with_a_letter_goes_straight_to_that_search() {
+        let root = crate::testing::temp_dir().join(format!("tadoru-jump-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let mut picker = test_picker(root.clone(), Mode::Dirs);
+        let ctrl = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL);
+
+        for (letter, mode) in [
+            ('s', Mode::Favorites),
+            ('r', Mode::Recent),
+            ('f', Mode::Files),
+            ('d', Mode::Dirs),
+        ] {
+            picker.handle_key(ctrl(letter));
+            assert_eq!(picker.mode, mode, "Ctrl-{letter}");
+        }
+        // From browse, one press instead of Shift-Tab four times over, and
+        // Tab from browse then comes back to the search reached this way.
+        picker.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        assert_eq!(picker.mode, Mode::Browse);
+        picker.handle_key(ctrl('s'));
+        assert_eq!(picker.mode, Mode::Favorites);
+        picker.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        picker.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        assert_eq!(picker.mode, Mode::Favorites);
+
+        // The plain letter and AltGr leave the mode alone, and the plain
+        // letter is typed into the filter.
+        picker.handle_key(ctrl('f'));
+        for key in [
+            KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE),
+            KeyEvent::new(
+                KeyCode::Char('s'),
+                KeyModifiers::ALT | KeyModifiers::CONTROL,
+            ),
+        ] {
+            picker.handle_key(key);
+            assert_eq!(picker.mode, Mode::Files, "{key:?}");
+        }
+        assert_eq!(picker.query, "s");
+        drop(picker);
+        crate::testing::remove_tree(&root);
     }
 
     #[test]
