@@ -264,6 +264,8 @@ struct Picker {
     notice: Option<String>,
     pinned: crate::favorites::Index,
     menu: Option<crate::action_menu::Menu>,
+    /// The panel of keys that Ctrl-Space opens.
+    keys: Option<crate::key_menu::KeyMenu>,
     mouse_rows: (Rect, usize, usize),
     mouse_header: Rect,
     /// Clickable areas of the navigation buttons, empty outside browse mode.
@@ -337,6 +339,7 @@ pub fn run(args: PickArgs, root: PathBuf, config: Config) -> Result<Option<PathB
         notice,
         pinned,
         menu: None,
+        keys: None,
         mouse_rows: (Rect::default(), 0, 0),
         mouse_header: Rect::default(),
         mouse_nav: Vec::new(),
@@ -630,6 +633,15 @@ impl Picker {
                         // takes its place.
                         self.block_clicks();
                         KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)
+                    } else if self.config.mouse
+                        && let Some(keys) = &mut self.keys
+                    {
+                        let Some(code) = keys.handle_mouse(mouse) else {
+                            continue;
+                        };
+                        // Closing under the pointer, as the action menu does.
+                        self.block_clicks();
+                        KeyEvent::new(code, KeyModifiers::NONE)
                     } else {
                         self.handle_mouse(mouse);
                         continue;
@@ -710,7 +722,7 @@ impl Picker {
     }
 
     fn handle_mouse(&mut self, mouse: MouseEvent) {
-        if !self.config.mouse || self.menu.is_some() {
+        if !self.config.mouse || self.menu.is_some() || self.keys.is_some() {
             return;
         }
         // A press arriving just after the screen was replaced is almost always
@@ -987,7 +999,37 @@ impl Picker {
                 }
             };
         }
+        if let Some(keys) = &mut self.keys {
+            return match keys.handle(key) {
+                crate::key_menu::Decision::Stay => Action::Continue,
+                crate::key_menu::Decision::Close => {
+                    self.keys = None;
+                    Action::Continue
+                }
+                crate::key_menu::Decision::Run(command) => {
+                    self.keys = None;
+                    match command {
+                        crate::key_menu::Command::Go(mode) => {
+                            self.switch_to(mode);
+                            Action::Continue
+                        }
+                        // Pressed for the reader, so a row and its shortcut
+                        // can never come to do different things.
+                        crate::key_menu::Command::Press(code, modifiers) => {
+                            self.handle_key(KeyEvent::new(code, modifiers))
+                        }
+                    }
+                }
+            };
+        }
         self.clear_notice();
+        // Some terminals send Ctrl-Space as a bare NUL.
+        if key.code == KeyCode::Null
+            || (key.code == KeyCode::Char(' ') && key.modifiers == KeyModifiers::CONTROL)
+        {
+            self.keys = Some(crate::key_menu::KeyMenu::new(self.mode));
+            return Action::Continue;
+        }
         // Ctrl does the same as Alt here. Terminals that use Alt with the
         // arrows to move between panes never pass those keys on, and a history
         // that only answers to them cannot be reached there at all.
@@ -1222,6 +1264,9 @@ impl Picker {
         if let Some(menu) = &mut self.menu {
             menu.render(area, frame);
         }
+        if let Some(keys) = &mut self.keys {
+            keys.render(area, frame);
+        }
     }
 
     fn render_screen(&mut self, area: Rect, frame: &mut ratatui::Frame) {
@@ -1275,10 +1320,9 @@ impl Picker {
                 &fit_hints(
                     &[
                         "Tab: browse",
+                        "^Space: keys",
                         &format!("S-Tab: {}", next_search(mode).label()),
-                        "^D/F/R/S: mode",
                         "Enter: cd",
-                        "Right: go in",
                         "Esc: clear/exit",
                         "^P: actions",
                         "^B: pin",
@@ -1523,7 +1567,7 @@ impl Picker {
                 &fit_hints(
                     &[
                         &format!("Tab: {}", self.search_mode.label()),
-                        "^D/F/R/S: mode",
+                        "^Space: keys",
                         "Enter: cd",
                         "Left: up",
                         "Right: enter",
@@ -2472,6 +2516,7 @@ mod tests {
             notice: None,
             pinned: crate::favorites::Index::default(),
             menu: None,
+            keys: None,
             browser_root: PathBuf::new(),
             search_mode: first_search(mode),
             unlimited: false,
@@ -3502,6 +3547,48 @@ mod tests {
         assert_eq!(picker.browser().cwd, child);
         drop(picker);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn ctrl_space_opens_the_keys_and_a_plain_letter_runs_one() {
+        let root = crate::testing::temp_dir().join(format!("tadoru-keys-{}", std::process::id()));
+        let inner = root.join("only/inner");
+        std::fs::create_dir_all(&inner).unwrap();
+        let mut picker = test_picker(root.clone(), Mode::Dirs);
+        picker.set_query("inner");
+        picker.source().finish_scan();
+        while picker.source().matcher.tick(TICK_MS).running {}
+        let ctrl_space = KeyEvent::new(KeyCode::Char(' '), KeyModifiers::CONTROL);
+        let plain = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
+
+        // The letter goes to the panel, not into the filter, and the panel
+        // closes once it has run something.
+        picker.handle_key(ctrl_space);
+        assert!(picker.keys.is_some());
+        picker.handle_key(plain('s'));
+        assert_eq!(picker.mode, Mode::Favorites);
+        assert!(picker.keys.is_none());
+        assert_eq!(picker.query, "inner");
+
+        // Esc closes the panel and nothing else: the filter is still there,
+        // where Esc on the picker itself would have cleared it.
+        picker.handle_key(ctrl_space);
+        picker.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(picker.keys.is_none());
+        assert_eq!(picker.query, "inner");
+        assert_eq!(picker.mode, Mode::Favorites);
+
+        // A row that stands for a shortcut does what the shortcut does.
+        picker.handle_key(ctrl_space);
+        picker.handle_key(plain('d'));
+        while picker.source().matcher.tick(TICK_MS).running {}
+        picker.handle_key(KeyEvent::new(KeyCode::Null, KeyModifiers::NONE));
+        assert!(picker.keys.is_some(), "a bare NUL is Ctrl-Space too");
+        picker.handle_key(plain('l'));
+        assert_eq!(picker.mode, Mode::Browse);
+        assert_eq!(picker.browser().cwd, inner);
+        drop(picker);
+        crate::testing::remove_tree(&root);
     }
 
     #[test]

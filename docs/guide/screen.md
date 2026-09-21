@@ -125,6 +125,27 @@ restriction. The folder the scan root links to is checked too, and reparse point
 are not followed during a scan. `browse` still works, but listing and previewing folders does go
 over the network. Network mounts on Linux and macOS are not detected.
 
+## The list of keys
+
+**Ctrl-Space** opens a panel at the bottom right that lists what tadoru can do, one row each:
+
+```text
+d → dirs                           ^D
+s → favorites                      ^S
+l → Go into the selection       Right
+a → Actions for the selection      ^P
+```
+
+Press the letter at the left to run a row; nothing needs holding down with it. The arrow keys and
+Enter, or a click, work too, and Esc, Ctrl-Space again or a click outside closes the panel without
+doing anything. The tabs come first and the panel opens on the one you are on. At the right of each
+row is the shortcut that does the same with the panel closed, so the panel is also where the
+shortcuts are looked up: the key hints on the bottom border only show as many as fit.
+
+Only Ctrl-Space itself has to get through the terminal. If the terminal keeps one of the shortcuts
+for itself, the letter in the panel still works. Where Ctrl-Space is taken, by an input method for
+example, the shortcuts and the mouse are what is left.
+
 ## Modes and favorites
 
 **Tab** goes between the search and browse. The search is one of dirs, files, recent and favorites,

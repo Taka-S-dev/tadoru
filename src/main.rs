@@ -4,6 +4,7 @@ mod browse;
 mod config;
 mod favorites;
 mod icons;
+mod key_menu;
 mod keys;
 mod names;
 mod open;
