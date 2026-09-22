@@ -81,16 +81,16 @@ zoxide の `z` と `zi` には手を付けない。詳しくは[導入の詳細�
 
 Tab で検索と browse を行き来する。browse から戻る先は直前に使っていた検索で、
 `cf` で開いたなら files と browse の往復になる。検索の種類は Shift-Tab で
-dirs → files → recent → favorites と切り替える。上枠のモード名はクリックでも切り替わる。
+dirs → files → recent → favorites と切り替え、browse では 3 列とツリー表示を切り替える。
+上枠のモード名はクリックでも切り替わる。
 どのモードでも、文字を打てば絞り込み、Enter でそこへ cd。
 Esc は絞り込みを消し、空の状態でもう一度押すと終了する。Ctrl-C はいつでも終了する。
 
 | キー | 動作 |
 |---|---|
 | Ctrl-Space | キーの一覧を開く。そこでは修飾キーなしの 1 文字で実行できる（`s` で favorites など）。Esc で閉じる |
-| Ctrl-Space の後に v | browse をツリー表示にする（フォルダをその場で開閉でき、文字を打つと下の階層全体を探す）。もう一度で 3 列に戻る |
 | Tab | 検索と browse を行き来する。戻る先は直前に使っていた検索 |
-| Shift-Tab | 検索の種類を切り替える。browse では検索に戻る |
+| Shift-Tab | 検索の種類を切り替える。browse では 3 列とツリー表示を切り替える（ツリーはフォルダをその場で開閉でき、文字を打つと下の階層全体を探す） |
 | Ctrl-D / Ctrl-F / Ctrl-R / Ctrl-S | dirs・files・recent・favorites へ直接切り替える（S は ★ の starred） |
 | Ctrl-B | 選択中のフォルダをお気に入りに登録・解除 |
 | Ctrl-P | 選択中の項目に対するアクションメニュー |

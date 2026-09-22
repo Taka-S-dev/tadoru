@@ -80,7 +80,9 @@ impl KeyMenu {
             Entry {
                 key: 'v',
                 name: if tree { "Column view" } else { "Tree view" },
-                shortcut: "",
+                // Shift-Tab does this only in browse; in a search it steps
+                // through the searches.
+                shortcut: if browsing { "S-Tab" } else { "" },
                 command: Command::ToggleTree,
             },
             press(

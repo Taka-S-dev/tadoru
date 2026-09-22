@@ -691,6 +691,25 @@ impl Picker {
         self.preview = None;
     }
 
+    /// A click on a tab. Browse's two tabs also pick how it is drawn, from a
+    /// search as well as from browse.
+    fn select_tab(&mut self, (mode, tree): Tab) {
+        if mode != Mode::Browse {
+            self.switch_to(mode);
+        } else if self.mode == Mode::Browse {
+            if self.tree_view != tree {
+                self.toggle_tree();
+            }
+        } else if tree {
+            self.toggle_tree();
+        } else {
+            self.end_tree_search();
+            self.tree = None;
+            self.tree_view = false;
+            self.switch_to(Mode::Browse);
+        }
+    }
+
     /// Left in the tree: closes a folder, goes to the row above it, and from
     /// the root line moves the root up, as Left climbs in the columns.
     fn tree_left(&mut self) {
@@ -880,15 +899,15 @@ impl Picker {
         self.switch_to(target);
     }
 
-    /// Shift-Tab: the next kind of search. Browse goes back to its search
-    /// instead, as Tab does, so the key never leaves the reader in browse.
+    /// Shift-Tab: the next tab in the same bracket. In a search that is the
+    /// next kind of search; in browse it switches between the columns and
+    /// the tree. Tab is the key that crosses between the two brackets.
     fn next_search_mode(&mut self) {
-        let target = if self.mode == Mode::Browse {
-            self.search_mode
+        if self.mode == Mode::Browse {
+            self.toggle_tree();
         } else {
-            next_search(self.mode)
-        };
-        self.switch_to(target);
+            self.switch_to(next_search(self.mode));
+        }
     }
 
     /// First entry into browse uses the search selection; subsequent mode
@@ -1200,9 +1219,9 @@ impl Picker {
             && self.mouse_header.contains(position)
         {
             let first = self.mouse_modes_x;
-            for (mode, start, end) in tab_offsets() {
+            for (tab, start, end) in tab_offsets() {
                 if mouse.column >= first + start && mouse.column < first + end {
-                    self.switch_to(mode);
+                    self.select_tab(tab);
                     return;
                 }
             }
@@ -1816,7 +1835,7 @@ impl Picker {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(theme::BORDER)
-            .title(Line::from(mode_tabs(mode)))
+            .title(Line::from(mode_tabs((mode, false))))
             // Shift-Tab is named by where it leads, as Tab is in browse.
             .title_bottom(footer_line(
                 self.notice.as_deref(),
@@ -2085,12 +2104,13 @@ impl Picker {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(theme::BORDER)
-            .title(Line::from(mode_tabs(Mode::Browse)))
+            .title(Line::from(mode_tabs((Mode::Browse, true))))
             .title_bottom(footer_line(
                 self.notice.as_deref(),
                 &fit_hints(
                     &[
                         &format!("Tab: {}", self.search_mode.label()),
+                        "S-Tab: browse",
                         "^Space: keys",
                         "Enter: cd",
                         "Right: open",
@@ -2244,7 +2264,7 @@ impl Picker {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(theme::BORDER)
-            .title(Line::from(mode_tabs(Mode::Browse)))
+            .title(Line::from(mode_tabs((Mode::Browse, false))))
             // Tab goes back to whichever search was used last, so the hint
             // names it rather than leaving the reader to remember.
             .title_bottom(footer_line(
@@ -2252,6 +2272,7 @@ impl Picker {
                 &fit_hints(
                     &[
                         &format!("Tab: {}", self.search_mode.label()),
+                        "S-Tab: tree",
                         "^Space: keys",
                         "Enter: cd",
                         "Left: up",
@@ -2863,45 +2884,68 @@ fn crumb_spans(path: &Path) -> Vec<(Span<'static>, Option<PathBuf>)> {
     spans
 }
 
+/// A tab on the top border: a mode, and for browse which way it is drawn,
+/// true for the tree.
+type Tab = (Mode, bool);
+
+/// Every search, then browse as columns and as a tree. The tree is a tab of
+/// its own so that it can be seen, and reached, without the key panel.
+fn tabs() -> Vec<Tab> {
+    MODE_ORDER
+        .iter()
+        .map(|&m| (m, false))
+        .chain([(Mode::Browse, true)])
+        .collect()
+}
+
+fn tab_label((mode, tree): Tab) -> &'static str {
+    if tree { "tree" } else { mode.label() }
+}
+
 /// What is drawn before a tab's label, after the one before it.
 ///
 /// The four searches share a bracket and browse has its own: Shift-Tab steps
-/// through the searches and Tab goes across to browse, and five tabs in one
-/// row read as five of the same kind.
-fn tab_separator(mode: Mode) -> &'static str {
-    if mode == Mode::Browse { "]  [" } else { "|" }
+/// through the searches and Tab goes across to browse, and six tabs in one
+/// row read as six of the same kind.
+fn tab_separator(tab: Tab) -> &'static str {
+    if tab == (Mode::Browse, false) {
+        "]  ["
+    } else {
+        "|"
+    }
 }
 
 /// Where each tab's label starts and ends, counted in columns from the first
 /// label. Drawing and clicking both go by it, so a click cannot land on a
 /// different tab from the one drawn there.
-fn tab_offsets() -> Vec<(Mode, u16, u16)> {
+fn tab_offsets() -> Vec<(Tab, u16, u16)> {
     let mut offsets = Vec::new();
     let mut x = 0;
-    for (i, &m) in MODE_ORDER.iter().enumerate() {
+    for (i, tab) in tabs().into_iter().enumerate() {
         if i > 0 {
-            x += tab_separator(m).len() as u16;
+            x += tab_separator(tab).len() as u16;
         }
-        let end = x + m.label().len() as u16;
-        offsets.push((m, x, end));
+        let end = x + tab_label(tab).len() as u16;
+        offsets.push((tab, x, end));
         x = end;
     }
     offsets
 }
 
-/// The tabs, `[dirs|files|recent|favorites]  [browse]`, drawn on the top border.
-fn mode_tabs(mode: Mode) -> Vec<Span<'static>> {
+/// The tabs, `[dirs|files|recent|favorites]  [browse|tree]`, drawn on the top
+/// border with the one shown underlined.
+fn mode_tabs(shown: Tab) -> Vec<Span<'static>> {
     let mut header: Vec<Span> = vec![Span::styled("[", theme::HEADER)];
-    for (i, &m) in MODE_ORDER.iter().enumerate() {
+    for (i, tab) in tabs().into_iter().enumerate() {
         if i > 0 {
-            header.push(Span::styled(tab_separator(m), theme::HEADER));
+            header.push(Span::styled(tab_separator(tab), theme::HEADER));
         }
-        let style = if m == mode {
+        let style = if tab == shown {
             theme::HEADER.add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
         } else {
             theme::HEADER
         };
-        header.push(Span::styled(m.label(), style));
+        header.push(Span::styled(tab_label(tab), style));
     }
     header.push(Span::styled("] ", theme::HEADER));
     header
@@ -4481,11 +4525,11 @@ mod tests {
         };
 
         // The four searches share one bracket; browse, which Tab pairs with
-        // them, has its own.
+        // them, has its own, with the columns and the tree side by side.
         let mut picker = test_picker(root.clone(), Mode::Browse);
         find(
             &top_row(&mut picker),
-            "[dirs|files|recent|favorites]  [browse]",
+            "[dirs|files|recent|favorites]  [browse|tree]",
         );
 
         // The first and last letter of each label switch to that mode.
@@ -4508,6 +4552,30 @@ mod tests {
         let gap = find(&top_row(&mut picker), "]  [") + 1;
         click(&mut picker, gap);
         assert_eq!(picker.mode, Mode::Browse, "the gap switched modes");
+
+        // tree draws browse as a tree, from browse or from a search, and
+        // browse draws it as columns again.
+        for start_in in [Mode::Browse, Mode::Dirs] {
+            let mut picker = test_picker(root.clone(), start_in);
+            let at = find(&top_row(&mut picker), "|tree") + 1;
+            click(&mut picker, at);
+            assert!(picker.in_tree(), "tree from {start_in:?}");
+            let at = find(&top_row(&mut picker), "browse");
+            click(&mut picker, at);
+            assert_eq!(picker.mode, Mode::Browse);
+            assert!(!picker.tree_view, "browse from the tree");
+        }
+
+        // From a search, browse is columns even if the tree was used last.
+        let mut picker = test_picker(root.clone(), Mode::Browse);
+        let at = find(&top_row(&mut picker), "|tree") + 1;
+        click(&mut picker, at);
+        let at = find(&top_row(&mut picker), "dirs");
+        click(&mut picker, at);
+        assert_eq!(picker.mode, Mode::Dirs);
+        let at = find(&top_row(&mut picker), "browse");
+        click(&mut picker, at);
+        assert!(picker.mode == Mode::Browse && !picker.tree_view);
 
         crate::testing::remove_tree(&root);
     }
@@ -5751,8 +5819,16 @@ mod tests {
         assert_eq!(picker.mode, Mode::Dirs, "Shift-Tab stopped in browse");
         picker.handle_key(tab);
         assert_eq!(picker.mode, Mode::Browse);
-        // From browse, Shift-Tab goes back to that search too.
+        // In browse, Shift-Tab switches between the columns and the tree,
+        // and each names where it leads.
+        assert!(hints(&mut picker).contains("S-Tab: tree"));
         picker.handle_key(back_tab);
+        assert!(picker.in_tree(), "Shift-Tab did not open the tree");
+        assert!(hints(&mut picker).contains("S-Tab: browse"));
+        picker.handle_key(back_tab);
+        assert!(picker.mode == Mode::Browse && !picker.tree_view);
+        // Tab still goes back to the search, from either.
+        picker.handle_key(tab);
         assert_eq!(picker.mode, Mode::Dirs);
 
         // Opened straight into browse, Tab starts the directory search.

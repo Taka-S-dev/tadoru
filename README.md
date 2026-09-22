@@ -83,16 +83,16 @@ chosen folder instead: `tadoru pick --on-accept "Open shell here"` starts a shel
 
 Tab goes between the search and browse. Browse goes back to the search used last, so after
 `cf` Tab goes between files and browse. Shift-Tab changes the kind of search:
-dirs → files → recent → favorites. The mode names on the top border also switch with a click.
+dirs → files → recent → favorites, and in browse it switches between the columns and a tree.
+The mode names on the top border also switch with a click.
 In every mode, typing filters the list and Enter cds there.
 Esc clears the filter, and pressed again on an empty filter it quits. Ctrl-C always quits.
 
 | Key | What it does |
 |---|---|
 | Ctrl-Space | Open the list of keys. A plain letter there runs one, such as `s` for favorites; Esc closes it |
-| Ctrl-Space, then v | Draw browse as a tree whose folders open in place and where typing searches everything below, or go back to the columns |
 | Tab | Go between the search and browse, back to the search used last |
-| Shift-Tab | Change to the next kind of search. In browse, go back to the search |
+| Shift-Tab | Change to the next kind of search. In browse, switch between the columns and a tree whose folders open in place and where typing searches everything below |
 | Ctrl-D / Ctrl-F / Ctrl-R / Ctrl-S | Go straight to dirs, files, recent or favorites (S for starred) |
 | Ctrl-B | Pin or unpin the selected folder as a favorite |
 | Ctrl-P | Open the action menu for the selected item |
