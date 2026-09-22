@@ -88,15 +88,16 @@ impl Action {
     /// The character that runs this action, if it has one.
     ///
     /// The menu is read, not typed at, so every letter comes from a word in
-    /// its own name and stays put as the list grows. Five names start with
-    /// Open, so `o` goes to the temporary copy, which has no other way in,
-    /// and the plain one takes `d` for default.
+    /// its own name and stays put as the list grows. `o` opens, as it does in
+    /// yazi and as Ctrl-O does outside the menu; the other names that start
+    /// with Open take their next word. The copies folder is rarely wanted and
+    /// every word of its name is taken, so it is picked from the list instead.
     pub fn key(&self) -> Option<char> {
         match self {
             Self::Reveal => Some('f'),
-            Self::Open => Some('d'),
-            Self::TempCopy => Some('o'),
-            Self::TempFolder => Some('t'),
+            Self::Open => Some('o'),
+            Self::TempCopy => Some('t'),
+            Self::TempFolder => None,
             Self::Copy => Some('c'),
             Self::Editor => Some('v'),
             Self::Shell => Some('s'),
@@ -360,9 +361,16 @@ fn default_shell() -> OsString {
 }
 
 fn defaults(target: &Path) -> Vec<Action> {
-    let mut actions = vec![Action::Reveal, Action::Editor, Action::Copy, Action::Shell];
+    // Opening a folder shows it in the file manager, as a double click does,
+    // so Open is there for both. Only a file can be copied.
+    let mut actions = vec![
+        Action::Reveal,
+        Action::Editor,
+        Action::Copy,
+        Action::Shell,
+        Action::Open,
+    ];
     if target.is_file() {
-        actions.push(Action::Open);
         actions.push(Action::TempCopy);
     }
     actions
@@ -812,6 +820,14 @@ mod tests {
                 .iter()
                 .any(|action| matches!(action, Action::TempCopy))
         );
+        // Opening is offered for a folder as well, where it means the file manager.
+        for target in [&source, &fixture.0] {
+            assert!(
+                defaults(target)
+                    .iter()
+                    .any(|action| matches!(action, Action::Open))
+            );
+        }
     }
 
     #[test]

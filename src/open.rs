@@ -12,12 +12,9 @@ pub fn reveal(path: &Path) -> std::io::Result<()> {
     spawn(program, args)
 }
 
-/// Opens a file with its associated application. Directories are ignored:
-/// that is what `reveal` is for.
+/// Opens `path` as a double click would: a file with its associated
+/// application, a folder in the file manager.
 pub fn launch(path: &Path) -> std::io::Result<()> {
-    if path.is_dir() {
-        return Ok(());
-    }
     let (program, args) = launch_command(path);
     spawn(program, args)
 }
@@ -50,7 +47,8 @@ fn reveal_command(path: &Path, is_dir: bool) -> (&'static str, Vec<OsString>) {
 
 #[cfg(windows)]
 fn launch_command(path: &Path) -> (&'static str, Vec<OsString>) {
-    // Given a file, explorer.exe opens it with the associated program.
+    // explorer.exe opens a file with its associated program and a folder as
+    // a window of its own.
     ("explorer.exe", vec![path.as_os_str().to_owned()])
 }
 
@@ -94,5 +92,14 @@ mod tests {
         assert_eq!(args, vec![OsString::from(r"/select,C:\a b\c.txt")]);
         let (_, args) = reveal_command(Path::new(r"C:\a b"), true);
         assert_eq!(args, vec![OsString::from(r"C:\a b")]);
+    }
+
+    #[test]
+    fn opening_hands_files_and_folders_alike_to_explorer() {
+        for path in [r"C:\a b\c.txt", r"C:\a b"] {
+            let (prog, args) = launch_command(Path::new(path));
+            assert_eq!(prog, "explorer.exe");
+            assert_eq!(args, vec![OsString::from(path)]);
+        }
     }
 }

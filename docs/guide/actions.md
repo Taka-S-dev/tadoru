@@ -17,19 +17,21 @@ keys and press Enter, or click.
 
 | Key | Action |
 |---|---|
+| o | Open with default application |
 | f | Open in file manager |
 | v | Open in VS Code |
 | c | Copy path |
 | s | Open shell here |
-| d | Open with default application |
-| o | Open temporary copy (TEMP_) |
+| t | Open temporary copy (TEMP_) |
 
-Five of these start with Open, so `o` goes to the temporary copy, which has no other way in.
-Outside the menu, Ctrl-E opens the selection with its default application and Ctrl-O shows it in the
-file manager.
+`o` opens, as it does in yazi: a file with its default application, and a folder in the file
+manager, as a double click would. `f` shows the item in the file manager instead, so for a file it
+opens the folder holding it with the file selected. Outside the menu Ctrl-O and Ctrl-E do the same
+as `o` and, with E for Explorer, `f`.
 
-Below the list, after a divider, is **t Open temporary copies folder**. It is the one item that does
-not act on the selection: it opens the folder where tadoru keeps its temporary copies. Mixed into the
+Below the list, after a divider, is **Open temporary copies folder**. It has no key: it is rarely
+wanted, and every word of its name is already a key above. It is the one item that does not act on
+the selection: it opens the folder where tadoru keeps its temporary copies. Mixed into the
 list it would look like an action on the row, so it sits apart. Filtering does not hide it.
 
 **Tab** or **/** moves to the input box, where typing filters the actions. Use it when there are many
@@ -39,9 +41,9 @@ typed, so the next key applies to the whole list again. While you type, the left
 
 ## Built-in actions
 
-Without any configuration you get Open in file manager, Open in VS Code, Copy path and Open shell
-here; for a file, Open with default application is shown as well. Open in VS Code needs `code` on
-PATH.
+Without any configuration you get Open with default application, Open in file manager, Open in VS
+Code, Copy path and Open shell here; for a file, Open temporary copy is shown as well. Open in VS
+Code needs `code` on PATH.
 
 **Open shell here** starts a shell in the selected folder, or beside the selected file, on the same
 terminal. Leaving the shell brings you back to tadoru. The shell is the one the environment names:
@@ -104,7 +106,7 @@ keep working. Configuration found in the folders you move to is never read or ru
       "args": ["-C", "{dir}", "status", "--short"],
       "target": "any",
       "run": "terminal",
-      "key": "s"
+      "key": "g"
     },
     {
       "name": "My script",

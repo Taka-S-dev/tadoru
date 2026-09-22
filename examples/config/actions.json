@@ -8,7 +8,7 @@
       "args": ["-C", "{dir}", "status", "--short"],
       "target": "any",
       "run": "terminal",
-      "key": "s"
+      "key": "g"
     },
     {
       "name": "Git log",

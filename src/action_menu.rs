@@ -596,7 +596,7 @@ mod tests {
         // of the window instead left eighteen blank rows between the two.
         assert_eq!(row(5), "  c → Copy path");
         assert_eq!(row(6), "─".repeat(44));
-        assert_eq!(row(7), "  t → Open temporary copies folder");
+        assert_eq!(row(7), "      Open temporary copies folder");
         assert_eq!(row(8), "");
     }
 
@@ -617,7 +617,7 @@ mod tests {
         }
         // A blank line keeps it from reading as the last row of the list.
         assert_eq!(row(&terminal, 5), "─".repeat(44));
-        assert_eq!(row(&terminal, 6), "  t → Open temporary copies folder");
+        assert_eq!(row(&terminal, 6), "      Open temporary copies folder");
 
         // The filter never hides it, because it is not one of the items.
         menu.handle(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
@@ -631,12 +631,13 @@ mod tests {
         // With nothing matching, the list keeps one row for its message and
         // the zone stays right under it.
         assert_eq!(row(&terminal, 4), "─".repeat(44));
-        assert_eq!(row(&terminal, 5), "  t → Open temporary copies folder");
+        assert_eq!(row(&terminal, 5), "      Open temporary copies folder");
 
-        // Its key runs it from either mode, and a click on it does too.
+        // It has no key; t opens a temporary copy of a file instead, and with
+        // no file selected it does nothing. A click runs it.
         assert!(matches!(
             menu.handle(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::ALT)),
-            Decision::Run(action) if matches!(*action, Action::TempFolder)
+            Decision::Stay
         ));
         let click = MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),

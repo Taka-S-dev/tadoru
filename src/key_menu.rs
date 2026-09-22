@@ -111,14 +111,8 @@ impl KeyMenu {
                 ctrl,
             ),
             press('p', "Pin or unpin", "^B", KeyCode::Char('b'), ctrl),
-            press('o', "Show in file manager", "^O", KeyCode::Char('o'), ctrl),
-            press(
-                'e',
-                "Open with default application",
-                "^E",
-                KeyCode::Char('e'),
-                ctrl,
-            ),
+            press('o', "Open", "^O", KeyCode::Char('o'), ctrl),
+            press('e', "Show in file manager", "^E", KeyCode::Char('e'), ctrl),
             press('5', "Refresh", "F5", KeyCode::F(5), none),
         ];
         // Opens on the tab the picker is on, so Down goes to the next one.

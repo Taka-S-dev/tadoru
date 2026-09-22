@@ -930,11 +930,7 @@ impl Picker {
             self.menu = Some(crate::action_menu::Menu::new(target));
             return;
         }
-        let result = if target.is_dir() {
-            open::reveal(&target)
-        } else {
-            open::launch(&target)
-        };
+        let result = open::launch(&target);
         self.report_open(&target, result);
     }
 
@@ -1231,16 +1227,17 @@ impl Picker {
                 self.next_search_mode();
                 return Action::Continue;
             }
-            // Hand the selection to the desktop and stay open, as yazi does.
+            // Hand the selection to the desktop and stay open. O opens, as o
+            // does in the action menu and in yazi; E shows it in Explorer.
             (KeyCode::Char('o'), true) => {
                 if let Some(path) = self.selected_path() {
-                    self.report_open(&path, open::reveal(&path));
+                    self.report_open(&path, open::launch(&path));
                 }
                 return Action::Continue;
             }
             (KeyCode::Char('e'), true) => {
                 if let Some(path) = self.selected_path() {
-                    self.report_open(&path, open::launch(&path));
+                    self.report_open(&path, open::reveal(&path));
                 }
                 return Action::Continue;
             }

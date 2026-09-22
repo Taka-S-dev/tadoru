@@ -71,13 +71,14 @@ pointer, so clicks are ignored for 0.3 seconds afterwards; a quick second click 
 list that was behind the menu. The wheel and the keyboard keep working.
 
 Right-click an item in any column to open it with its default application; a folder opens in the
-file manager. From the keyboard, Ctrl-O shows the selected item in the file manager and Ctrl-E
-opens it with its default application. Actions that start another application (right-click,
-Ctrl-O, Ctrl-E and `detach` actions) leave the screen as it is, so their result is shown at the
-bottom of the screen. Success and failure have different colours, and both differ from the key
-hints that are always there. A success message goes away after 3 seconds; a failure stays until the
-next key or click, so it can be read. tadoru's part ends once it has asked for the application to
-start, and it cannot tell when the application actually appears, so no progress is shown.
+file manager. From the keyboard, Ctrl-O does the same, and Ctrl-E shows the selected item in the
+file manager, a file inside its folder with the file selected. Actions that start another
+application (right-click, Ctrl-O, Ctrl-E and `detach` actions) leave the screen as it is, so their
+result is shown at the bottom of the screen. Success and failure have different colours, and both
+differ from the key hints that are always there. A success message goes away after 3 seconds; a
+failure stays until the next key or click, so it can be read. tadoru's part ends once it has asked
+for the application to start, and it cannot tell when the application actually appears, so no
+progress is shown.
 
 Ctrl+right-click opens that item's action menu, the same as Ctrl-P. In the left and right columns
 it does not change the current folder; the item clicked is the target. The preview on the right of
