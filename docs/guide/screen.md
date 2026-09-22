@@ -275,3 +275,30 @@ of the way, and the screen is put back when tadoru exits; that output stays in t
 shell. Cancelling, a failure, or a move to the same place does not change it, and a plain `cd` is
 not recorded. If there is nowhere to go back to, or that place has been deleted, tadoru says why and
 stays put.
+
+## The tree view
+
+Browse can also be drawn as a tree, for when the shape of a folder matters more than one level of
+it: open Ctrl-Space and press `v`, and again to go back to the columns. From a search the same key
+opens browse as a tree, and Tab returns to whichever of the two was used last.
+
+```text
+C:\work\project\
+├─ docs\
+├─ src\
+│  ├─ main.rs
+│  └─ picker.rs
+└─ README.md
+```
+
+The top line is the folder browse is in, and below it what that folder holds, in the same order as
+the columns. Right opens a folder in place, and on an open folder moves into it; Left closes an open
+folder, and otherwise goes to the line it sits under. On the top line Left moves the whole tree up a
+level, keeping the branches that were open, and on Windows from the top of a drive to the list of
+drives. A double click opens or closes a folder. A folder is read when it is opened, not before.
+
+Enter goes to the selected folder, or to the folder holding the selected file; on the top line it
+goes to the folder browse is in. The tree starts on the item that was selected in the columns, and
+going back to the columns selects the item chosen in the tree. Moving the top of the tree up is kept
+in browse's history, so Ctrl+← and Ctrl-T come back. F5 reads the open folders again and keeps them
+open. Typing does nothing in the tree yet.

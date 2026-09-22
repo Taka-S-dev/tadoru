@@ -101,7 +101,7 @@ pub fn read_dir(dir: &Path) -> Vec<Item> {
 }
 
 /// What a folder holds, or the drives for the empty path above them.
-fn listing(dir: &Path) -> Vec<Item> {
+pub fn listing(dir: &Path) -> Vec<Item> {
     if dir.as_os_str().is_empty() {
         drives()
     } else {

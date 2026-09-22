@@ -14,6 +14,7 @@ mod setup;
 mod shim;
 #[cfg(test)]
 mod testing;
+mod tree;
 
 use std::path::PathBuf;
 use std::process::ExitCode;

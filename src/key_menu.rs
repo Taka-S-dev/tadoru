@@ -21,6 +21,8 @@ use crate::action_menu::{ARROW, ARROW_STYLE, KEY_STYLE, SELECTED_STYLE, float, o
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
     Go(Mode),
+    /// Switch browse between its columns and the tree.
+    ToggleTree,
     /// Anything the picker already has a shortcut for is run by pressing it,
     /// so the panel cannot drift from what the shortcut does.
     Press(KeyCode, KeyModifiers),
@@ -53,8 +55,8 @@ pub struct KeyMenu {
 
 impl KeyMenu {
     /// `origin` is the mode Right goes back to from recent and favorites,
-    /// which the row for it names.
-    pub fn new(here: Mode, origin: Mode) -> Self {
+    /// which the row for it names. `tree` says browse is drawn as a tree.
+    pub fn new(here: Mode, origin: Mode, tree: bool) -> Self {
         let tab = |key, mode: Mode, shortcut| Entry {
             key,
             name: mode.label(),
@@ -75,9 +77,16 @@ impl KeyMenu {
             tab('r', Mode::Recent, "^R"),
             tab('s', Mode::Favorites, "^S"),
             tab('b', Mode::Browse, "Tab"),
+            Entry {
+                key: 'v',
+                name: if tree { "Column view" } else { "Tree view" },
+                shortcut: "",
+                command: Command::ToggleTree,
+            },
             press(
                 'l',
                 match (here, origin) {
+                    (Mode::Browse, _) if tree => "Open the folder",
                     (Mode::Browse, _) => "Go down a level",
                     // A list of places is left for where it was opened from,
                     // now at the place chosen.
@@ -92,10 +101,10 @@ impl KeyMenu {
             ),
             press(
                 'h',
-                if browsing {
-                    "Go up a level"
-                } else {
-                    "Search one level up"
+                match (browsing, tree) {
+                    (true, true) => "Close the folder, or go up",
+                    (true, false) => "Go up a level",
+                    (false, _) => "Search one level up",
                 },
                 "Left",
                 KeyCode::Left,
@@ -122,7 +131,7 @@ impl KeyMenu {
             .unwrap_or(0);
         Self {
             entries,
-            tabs: 5,
+            tabs: 6,
             here,
             selected,
             mouse_rows: Rect::default(),
@@ -264,7 +273,7 @@ mod tests {
 
     #[test]
     fn a_plain_letter_runs_its_row_and_esc_or_ctrl_space_closes() {
-        let mut menu = KeyMenu::new(Mode::Dirs, Mode::Dirs);
+        let mut menu = KeyMenu::new(Mode::Dirs, Mode::Dirs, false);
         assert!(matches!(
             menu.handle(key('s')),
             Decision::Run(Command::Go(Mode::Favorites))
@@ -289,7 +298,7 @@ mod tests {
 
     #[test]
     fn it_opens_on_the_current_tab_and_enter_runs_the_selection() {
-        let mut menu = KeyMenu::new(Mode::Recent, Mode::Browse);
+        let mut menu = KeyMenu::new(Mode::Recent, Mode::Browse, false);
         assert!(matches!(
             menu.handle(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
             Decision::Run(Command::Go(Mode::Recent))
@@ -308,7 +317,7 @@ mod tests {
 
     #[test]
     fn rows_name_the_shortcut_and_clicks_land_on_the_right_row() {
-        let mut menu = KeyMenu::new(Mode::Browse, Mode::Browse);
+        let mut menu = KeyMenu::new(Mode::Browse, Mode::Browse, false);
         let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
         terminal
             .draw(|frame| menu.render(frame.area(), frame))
@@ -323,11 +332,12 @@ mod tests {
         assert!(text(rows.y).starts_with("  d → dirs"), "{}", text(rows.y));
         assert!(text(rows.y).trim_end().ends_with("^D"));
         // Opened from browse, the two moves are named for what they do there.
-        assert!(text(rows.y + 6).contains("l → Go down a level"));
-        assert!(text(rows.y + 5).starts_with("─"));
+        assert!(text(rows.y + 5).contains("v → Tree view"));
+        assert!(text(rows.y + 7).contains("l → Go down a level"));
+        assert!(text(rows.y + 6).starts_with("─"));
         // From favorites the same row says where Right goes back to.
         let names = |here, origin| -> Vec<&str> {
-            KeyMenu::new(here, origin)
+            KeyMenu::new(here, origin, false)
                 .entries
                 .iter()
                 .map(|entry| entry.name)
@@ -345,11 +355,11 @@ mod tests {
         };
         // Below the rule the rows are one further down than their index.
         assert_eq!(
-            menu.handle_mouse(click(rows.y + 6, rows.x + 3)),
+            menu.handle_mouse(click(rows.y + 7, rows.x + 3)),
             Some(KeyCode::Enter)
         );
         assert_eq!(menu.entries[menu.selected].key, 'l');
-        assert_eq!(menu.handle_mouse(click(rows.y + 5, rows.x + 3)), None);
+        assert_eq!(menu.handle_mouse(click(rows.y + 6, rows.x + 3)), None);
         // A click outside the panel closes it.
         assert_eq!(menu.handle_mouse(click(0, 0)), Some(KeyCode::Esc));
     }

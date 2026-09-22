@@ -230,6 +230,12 @@ struct Picker {
     sources: [Option<Source>; MODE_ORDER.len()],
     /// State of browse mode, created when the mode is first shown.
     browser: Option<Browser>,
+    /// Whether browse is drawn as a tree rather than in columns. Kept while
+    /// in a search, so Tab comes back to the layout left.
+    tree_view: bool,
+    /// The tree, rooted where browse is. Built when first drawn and again
+    /// whenever browse has moved somewhere else.
+    tree: Option<crate::tree::Tree>,
     /// The scan root browse was last lined up with.
     ///
     /// Browse keeps where it was, so flipping between it and a search stays
@@ -355,6 +361,8 @@ pub fn run(args: PickArgs, root: PathBuf, config: Config) -> Result<Option<PathB
         pinned,
         menu: None,
         keys: None,
+        tree_view: false,
+        tree: None,
         origin: place_mode(args.mode),
         mouse_rows: (Rect::default(), 0, 0),
         mouse_header: Rect::default(),
@@ -462,6 +470,82 @@ impl Picker {
     fn browser(&mut self) -> &mut Browser {
         let root = self.root.clone();
         self.browser.get_or_insert_with(|| Browser::new(root))
+    }
+
+    /// The tree for where browse is. Built again whenever browse has moved
+    /// somewhere else, as its history and the columns can move it; the row
+    /// selected in the columns starts out selected.
+    fn tree(&mut self) -> &mut crate::tree::Tree {
+        let root = self.browser().cwd.clone();
+        if self.tree.as_ref().is_none_or(|tree| tree.root != root) {
+            let select = self.browser().selected_path();
+            self.tree = Some(crate::tree::Tree::new(root, select.as_deref()));
+        }
+        self.tree.as_mut().expect("just built")
+    }
+
+    fn in_tree(&self) -> bool {
+        self.mode == Mode::Browse && self.tree_view
+    }
+
+    /// Switches browse between its columns and the tree; from a search it
+    /// opens browse as a tree. Leaving the tree, what was selected there is
+    /// shown selected in the columns, in the folder holding it.
+    fn toggle_tree(&mut self) {
+        if self.mode != Mode::Browse {
+            self.tree_view = true;
+            self.switch_to(Mode::Browse);
+            return;
+        }
+        if self.tree_view {
+            let selected = self.tree.as_ref().and_then(|tree| tree.selected_path());
+            if let Some(path) = selected
+                && path != self.browser().cwd
+            {
+                self.browser().reveal(&path);
+            }
+            self.tree = None;
+        }
+        self.tree_view = !self.tree_view;
+        self.preview = None;
+    }
+
+    /// Left in the tree: closes a folder, goes to the row above it, and from
+    /// the root line moves the root up, as Left climbs in the columns.
+    fn tree_left(&mut self) {
+        if !self.tree().left() {
+            return;
+        }
+        let Some(parent) = self.browser().parent_dir() else {
+            return;
+        };
+        // The tree moves first, keeping its open branches, so that browse
+        // arriving at the same place does not have it built again.
+        self.tree().rise(parent);
+        self.browser().up();
+        self.preview = None;
+    }
+
+    fn handle_tree_key(&mut self, key: KeyEvent) -> Action {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        if is_erase(&key) {
+            // Nothing is typed in the tree yet, so Backspace goes up as
+            // it does in the columns once the filter is empty.
+            if self.erase(false) {
+                self.tree_left();
+            }
+            return Action::Continue;
+        }
+        match (key.code, ctrl) {
+            (KeyCode::Left, _) => self.tree_left(),
+            (KeyCode::Right, _) | (KeyCode::Char('l'), true) => self.tree().right(),
+            (KeyCode::Up, _) | (KeyCode::Char('k'), true) => self.tree().move_selection(-1),
+            (KeyCode::Down, _) | (KeyCode::Char('j'), true) => self.tree().move_selection(1),
+            (KeyCode::PageUp, _) => self.tree().move_selection(-10),
+            (KeyCode::PageDown, _) => self.tree().move_selection(10),
+            _ => {}
+        }
+        Action::Continue
     }
 
     /// Leaves a search for browse at `path`: inside a folder, or beside a file
@@ -775,7 +859,11 @@ impl Picker {
                 }
                 Action::Accept => {
                     if self.mode == Mode::Browse {
-                        let target = self.browser().target();
+                        let target = if self.tree_view {
+                            self.tree().target()
+                        } else {
+                            self.browser().target()
+                        };
                         // In the list of drives, with nothing matching the
                         // filter, there is nowhere to go.
                         if target.as_os_str().is_empty() {
@@ -794,6 +882,9 @@ impl Picker {
     /// The file or directory under the cursor, as is (files mode gives the
     /// file, not its parent). Browse mode falls back to the directory shown.
     fn selected_path(&mut self) -> Option<PathBuf> {
+        if self.in_tree() {
+            return self.tree().selected_path();
+        }
         if self.mode == Mode::Browse {
             let b = self.browser();
             return b
@@ -893,7 +984,9 @@ impl Picker {
         if !area.contains(position) || count == 0 {
             return;
         }
-        let selected = if self.mode == Mode::Browse {
+        let selected = if self.in_tree() {
+            self.tree().selected
+        } else if self.mode == Mode::Browse {
             self.browser().selected
         } else {
             self.source().selected as usize
@@ -910,7 +1003,30 @@ impl Picker {
             MouseEventKind::ScrollDown => selected.saturating_add(3).min(count - 1),
             _ => return,
         };
-        if self.mode == Mode::Browse {
+        if self.in_tree() {
+            self.tree().selected = next;
+            if mouse.kind == MouseEventKind::Down(MouseButton::Left)
+                && let Some(path) = self.tree().selected_path()
+            {
+                // A double click opens or closes the folder, as in a file
+                // tree side panel.
+                let now = std::time::Instant::now();
+                let double = self
+                    .last_click
+                    .take()
+                    .is_some_and(|(previous, x, y, time)| {
+                        previous == path
+                            && x == mouse.column
+                            && y == mouse.row
+                            && now.duration_since(time) <= Duration::from_millis(500)
+                    });
+                if double {
+                    self.tree().toggle();
+                } else {
+                    self.last_click = Some((path, mouse.column, mouse.row, now));
+                }
+            }
+        } else if self.mode == Mode::Browse {
             self.browser().selected = next;
             if mouse.kind == MouseEventKind::Down(MouseButton::Left)
                 && let Some(path) = self.browser().selected_path()
@@ -1076,7 +1192,12 @@ impl Picker {
         }
         match nav {
             Nav::Up => {
-                self.browser().up();
+                if self.tree_view {
+                    self.tree().selected = 0;
+                    self.tree_left();
+                } else {
+                    self.browser().up();
+                }
                 self.preview = None;
             }
             Nav::Back | Nav::Forward => {
@@ -1119,6 +1240,10 @@ impl Picker {
                             self.switch_to(mode);
                             Action::Continue
                         }
+                        crate::key_menu::Command::ToggleTree => {
+                            self.toggle_tree();
+                            Action::Continue
+                        }
                         // Pressed for the reader, so a row and its shortcut
                         // can never come to do different things.
                         crate::key_menu::Command::Press(code, modifiers) => {
@@ -1136,7 +1261,11 @@ impl Picker {
         if key.code == KeyCode::Null
             || (key.code == KeyCode::Char(' ') && key.modifiers == KeyModifiers::CONTROL)
         {
-            self.keys = Some(crate::key_menu::KeyMenu::new(self.mode, self.origin));
+            self.keys = Some(crate::key_menu::KeyMenu::new(
+                self.mode,
+                self.origin,
+                self.in_tree(),
+            ));
             return Action::Continue;
         }
         // Ctrl does the same as Alt here. Terminals that use Alt with the
@@ -1189,7 +1318,9 @@ impl Picker {
                 return Action::Continue;
             }
             (KeyCode::Char('b'), true) => {
-                let target = if self.mode == Mode::Browse {
+                let target = if self.in_tree() {
+                    Some(self.tree().target()).filter(|path| !path.as_os_str().is_empty())
+                } else if self.mode == Mode::Browse {
                     Some(self.browser().target()).filter(|path| !path.as_os_str().is_empty())
                 } else {
                     let mode = self.mode;
@@ -1221,7 +1352,9 @@ impl Picker {
             (KeyCode::F(5), _) => {
                 self.reload_pinned();
                 self.preview = None;
-                if self.mode == Mode::Browse {
+                if self.in_tree() {
+                    self.tree().refresh();
+                } else if self.mode == Mode::Browse {
                     self.browser().refresh();
                 } else {
                     self.sources[mode_index(self.mode)] = None;
@@ -1343,6 +1476,9 @@ impl Picker {
     }
 
     fn handle_browse_key(&mut self, key: KeyEvent) -> Action {
+        if self.tree_view {
+            return self.handle_tree_key(key);
+        }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         // Backspace on an empty filter climbs, as in yazi, and Ctrl-H is
         // Backspace here as in the search.
@@ -1403,6 +1539,10 @@ impl Picker {
         self.mouse_nav.clear();
         self.mouse_crumbs.clear();
         self.mouse_paths.clear();
+        if self.in_tree() {
+            self.render_tree(area, frame);
+            return;
+        }
         if self.mode == Mode::Browse {
             self.render_browse(area, frame);
             return;
@@ -1693,6 +1833,121 @@ impl Picker {
     /// Miller columns: parent, current directory, selected entry's contents. The
     /// arrangement predates every terminal file manager; Finder's column view and
     /// ranger use it too.
+    /// Browse as a tree: the tree on the left, where the columns were, and
+    /// the selected folder's contents on the right, as in a search.
+    fn render_tree(&mut self, area: Rect, frame: &mut ratatui::Frame) {
+        let show_preview = area.width >= MIN_WIDTH_FOR_PREVIEW;
+        let [list_area, preview_area] = if show_preview {
+            Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)]).areas(area)
+        } else {
+            [area, Rect::default()]
+        };
+        if show_preview {
+            let dir = self.tree().selected_path().filter(|p| p.is_dir());
+            self.render_preview(preview_area, frame, dir.as_deref());
+        }
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(theme::BORDER)
+            .title(Line::from(mode_tabs(Mode::Browse)))
+            .title_bottom(footer_line(
+                self.notice.as_deref(),
+                &fit_hints(
+                    &[
+                        &format!("Tab: {}", self.search_mode.label()),
+                        "^Space: keys",
+                        "Enter: cd",
+                        "Right: open",
+                        "Left: close",
+                        "Ctrl/Alt-Left/Right: history",
+                        "^P: actions",
+                        "^B: pin",
+                    ],
+                    list_area.width.saturating_sub(2) as usize,
+                ),
+            ));
+        let inner = block.inner(list_area);
+        frame.render_widget(block, list_area);
+        let [prompt_area, info_area, header_area, rows_area] = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(0),
+        ])
+        .areas(inner);
+        self.mouse_header = Rect::new(list_area.x, list_area.y, list_area.width, 1);
+        self.mouse_modes_x = list_area.x + 2;
+        let location = self.browse_location(header_area);
+        frame.render_widget(Paragraph::new(Line::from(location)), header_area);
+        frame.render_widget(
+            Paragraph::new(Span::styled("> ", theme::PROMPT)),
+            prompt_area,
+        );
+        if prompt_area.width > 2 {
+            frame.set_cursor_position((prompt_area.x + 2, prompt_area.y));
+        }
+        let label = " tree ";
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(label, theme::INFO),
+                Span::styled(
+                    "─".repeat((info_area.width as usize).saturating_sub(label.len())),
+                    theme::BORDER,
+                ),
+            ])),
+            info_area,
+        );
+
+        self.tree();
+        let icons = self.config.icons;
+        let tree = self.tree.as_mut().expect("built above");
+        let height = rows_area.height as usize;
+        let count = tree.nodes().len();
+        tree.first = scroll_window(tree.first, tree.selected, count, height);
+        let first = tree.first;
+        let width = rows_area.width as usize;
+        let rows: Vec<ListItem> = tree
+            .nodes()
+            .iter()
+            .enumerate()
+            .skip(first)
+            .take(height)
+            .map(|(i, node)| {
+                let current = i == tree.selected;
+                let marks = RowMarks {
+                    icons,
+                    favorite: node.is_dir && self.pinned.contains(&node.path),
+                    inside: node.open,
+                };
+                let icon = marks.prefix(&node.label, node.is_dir);
+                let room = width.saturating_sub(2 + node.guide.width() + icon.width());
+                let style = match (current, node.depth == 0, node.is_dir) {
+                    (true, _, _) => theme::CURRENT,
+                    (false, true, _) => theme::HERE_PATH,
+                    (false, false, true) => theme::DIR,
+                    (false, false, false) => Style::default(),
+                };
+                let pointer = if current {
+                    Span::styled("▌ ", theme::POINTER)
+                } else {
+                    Span::raw("  ")
+                };
+                ListItem::new(
+                    Line::from(vec![
+                        pointer,
+                        Span::styled(node.guide.clone(), theme::BORDER),
+                        icons::span(icon),
+                        Span::raw(fit(&node.label, room)),
+                    ])
+                    .style(style),
+                )
+            })
+            .collect();
+        frame.render_widget(List::new(rows), rows_area);
+        self.mouse_rows = (rows_area, first, count);
+    }
+
     fn render_browse(&mut self, area: Rect, frame: &mut ratatui::Frame) {
         let block = Block::default()
             .borders(Borders::ALL)
@@ -1918,6 +2173,9 @@ impl Picker {
 
     /// The directory whose contents the preview pane should show.
     fn preview_target(&mut self) -> Option<PathBuf> {
+        if self.in_tree() {
+            return self.tree().selected_path().filter(|p| p.is_dir());
+        }
         if self.mode == Mode::Browse {
             return self.browser().selected_path().filter(|p| p.is_dir());
         }
@@ -2660,6 +2918,8 @@ mod tests {
             pinned: crate::favorites::Index::default(),
             menu: None,
             keys: None,
+            tree_view: false,
+            tree: None,
             origin: place_mode(mode),
             browser_root: PathBuf::new(),
             search_mode: first_search(mode),
@@ -3288,6 +3548,70 @@ mod tests {
                 .unwrap()
                 .starts_with("Nothing selected")
         );
+    }
+
+    #[test]
+    fn the_tree_opens_folders_in_place_and_shares_browse_s_place() {
+        let root =
+            crate::testing::temp_dir().join(format!("tadoru-treeview-{}", std::process::id()));
+        let inner = root.join("top/a");
+        std::fs::create_dir_all(inner.join("deep")).unwrap();
+        std::fs::write(inner.join("x.txt"), "").unwrap();
+        let top = root.join("top");
+        let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+        let ctrl_space = KeyEvent::new(KeyCode::Char(' '), KeyModifiers::CONTROL);
+
+        let mut picker = test_picker(top.clone(), Mode::Browse);
+        picker.browser().navigate_to(&inner);
+        picker.handle_key(ctrl_space);
+        picker.handle_key(key(KeyCode::Char('v')));
+        assert!(picker.in_tree());
+        assert_eq!(picker.tree().root, inner);
+
+        // It opens on the row selected in the columns. Down to x.txt: Enter
+        // goes to the folder holding it.
+        assert_eq!(picker.selected_path(), Some(inner.join("deep")));
+        picker.handle_key(key(KeyCode::Down));
+        assert_eq!(picker.selected_path(), Some(inner.join("x.txt")));
+        assert!(matches!(
+            picker.handle_key(key(KeyCode::Enter)),
+            Action::Accept
+        ));
+        assert_eq!(picker.tree().target(), inner);
+
+        // Left from a row goes to the root line; Left there moves the root up
+        // and browse with it, keeping the old root open and selected.
+        picker.handle_key(key(KeyCode::Left));
+        assert_eq!(picker.tree().selected, 0);
+        picker.handle_key(key(KeyCode::Left));
+        assert_eq!(picker.tree().root, top);
+        assert_eq!(picker.browser().cwd, top);
+        assert_eq!(picker.selected_path(), Some(inner.clone()));
+        assert!(picker.tree().selected_node().open);
+        // The move is in browse's history.
+        picker.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL));
+        assert_eq!(picker.browser().cwd, inner);
+        assert_eq!(picker.tree().root, inner);
+
+        // Back to the columns: the row chosen in the tree is selected there.
+        assert_eq!(picker.selected_path(), Some(inner.join("deep")));
+        picker.handle_key(key(KeyCode::Down));
+        picker.handle_key(ctrl_space);
+        picker.handle_key(key(KeyCode::Char('v')));
+        assert!(!picker.in_tree());
+        assert_eq!(picker.browser().selected_path(), Some(inner.join("x.txt")));
+
+        // The tree is remembered: from a search, Tab comes back to it, and a
+        // search started from the tree starts at its root. Favorites is used
+        // because it scans nothing.
+        picker.handle_key(ctrl_space);
+        picker.handle_key(key(KeyCode::Char('v')));
+        picker.switch_to(Mode::Favorites);
+        assert_eq!(picker.root, inner);
+        picker.switch_to(Mode::Browse);
+        assert!(picker.in_tree());
+        drop(picker);
+        crate::testing::remove_tree(&root);
     }
 
     #[test]

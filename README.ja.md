@@ -88,6 +88,7 @@ Esc は絞り込みを消し、空の状態でもう一度押すと終了する�
 | キー | 動作 |
 |---|---|
 | Ctrl-Space | キーの一覧を開く。そこでは修飾キーなしの 1 文字で実行できる（`s` で favorites など）。Esc で閉じる |
+| Ctrl-Space の後に v | browse をツリー表示にする（フォルダをその場で開閉できる）。もう一度で 3 列に戻る |
 | Tab | 検索と browse を行き来する。戻る先は直前に使っていた検索 |
 | Shift-Tab | 検索の種類を切り替える。browse では検索に戻る |
 | Ctrl-D / Ctrl-F / Ctrl-R / Ctrl-S | dirs・files・recent・favorites へ直接切り替える（S は ★ の starred） |
