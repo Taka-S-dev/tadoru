@@ -237,6 +237,13 @@ right. tadoru is a tool for cd, so it does not copy, delete or rename. Only the 
 background and a pointer, so it is always clear which column the cursor is in. The left and right
 columns mark the current folder in an accent colour.
 
+On Windows there is no folder above the top of a drive, so going up from one, with Left, Backspace
+or ▲, lists the drives, with the one just left selected. Enter goes to that drive and Right goes
+into it, so the top of a drive can be chosen like any other folder, and another drive can be picked
+from the same list. At the top of a drive the left column lists the drives too. A search started
+from the list begins at the drive selected. The list shows the drive letters Windows has assigned,
+mapped network drives included, and is made without opening any of them.
+
 **Ctrl+← goes back and Ctrl+→ goes forward.** Alt+← and Alt+→ do the same, but if the terminal uses
 Alt with the arrows for something else, such as moving between panes, those keys never reach tadoru,
 so use Ctrl. Ctrl-T goes back too, as it does after a tag jump in Vim. Unlike going up a level,

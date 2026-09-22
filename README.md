@@ -97,7 +97,7 @@ Esc clears the filter, and pressed again on an empty filter it quits. Ctrl-C alw
 | Ctrl-P | Open the action menu for the selected item |
 | Ctrl-A | When a scan stopped at its limit, collect the rest |
 | F5 | Refresh the list and the preview |
-| Left | Widen the search by one level. In browse, go up a level |
+| Left | Widen the search by one level. In browse, go up a level; on Windows, from the top of a drive to the list of drives |
 | Right | Go into the selection and keep going. From dirs and files it opens browse there; from favorites and recent it goes back to where you opened them from, now at that place. In browse, go down a level |
 | Ctrl+← / Ctrl+→ | Step back or forward through the places visited: folders in browse, starting points in a search. Alt+← / Alt+→ do the same, and Ctrl-T goes back as after a tag jump in Vim |
 

@@ -598,9 +598,18 @@ impl Picker {
         }
 
         if leaving == Mode::Browse {
-            let cwd = self.browser().cwd.clone();
+            // From the list of drives the search starts at the drive selected;
+            // with none selected it stays where it was.
+            let b = self.browser();
+            let cwd = if b.at_drives() {
+                b.target()
+            } else {
+                b.cwd.clone()
+            };
             let before = self.root.clone();
-            self.set_root(cwd);
+            if !cwd.as_os_str().is_empty() {
+                self.set_root(cwd);
+            }
             // Browsing away and switching back moves what the search covers.
             // Saying so, and naming the way back, is what keeps a wander from
             // quietly becoming a search of somewhere else.
@@ -766,7 +775,13 @@ impl Picker {
                 }
                 Action::Accept => {
                     if self.mode == Mode::Browse {
-                        return Ok(Some(Entry::absolute(self.browser().target())));
+                        let target = self.browser().target();
+                        // In the list of drives, with nothing matching the
+                        // filter, there is nowhere to go.
+                        if target.as_os_str().is_empty() {
+                            continue;
+                        }
+                        return Ok(Some(Entry::absolute(target)));
                     }
                     if let Some(entry) = self.source().selected_entry() {
                         return Ok(Some(entry));
@@ -781,7 +796,9 @@ impl Picker {
     fn selected_path(&mut self) -> Option<PathBuf> {
         if self.mode == Mode::Browse {
             let b = self.browser();
-            return Some(b.selected_path().unwrap_or_else(|| b.cwd.clone()));
+            return b
+                .selected_path()
+                .or_else(|| (!b.at_drives()).then(|| b.cwd.clone()));
         }
         self.source().selected_entry().map(|e| e.path())
     }
@@ -1173,7 +1190,7 @@ impl Picker {
             }
             (KeyCode::Char('b'), true) => {
                 let target = if self.mode == Mode::Browse {
-                    Some(self.browser().target())
+                    Some(self.browser().target()).filter(|path| !path.as_os_str().is_empty())
                 } else {
                     let mode = self.mode;
                     self.source()
@@ -1623,7 +1640,7 @@ impl Picker {
         let available = [
             self.browser().has_history(false),
             self.browser().has_history(true),
-            cwd.parent().is_some(),
+            self.browser().parent_dir().is_some(),
         ];
         self.mouse_nav.clear();
         self.mouse_crumbs.clear();
@@ -1652,6 +1669,9 @@ impl Picker {
             let star = icons::span("★ ");
             x += star.content.width() as u16;
             title.push(star);
+        }
+        if cwd.as_os_str().is_empty() {
+            title.push(Span::styled("Drives", theme::HERE_PATH));
         }
         for (span, dir) in crumb_spans(&cwd) {
             let width = span.content.width() as u16;
@@ -1759,7 +1779,9 @@ impl Picker {
             frame.render_widget(Paragraph::new(bar), sep);
         }
 
-        // Parent column: the directory we are in is marked.
+        // Parent column: the directory we are in is marked. Above the top of a
+        // drive it lists the drives.
+        let parent_dir = browser.parent_dir();
         if let Some((items, here)) = browser.parent_listing() {
             let height = parent_area.height as usize;
             let first = centred_scroll(here.unwrap_or(0), items.len(), height);
@@ -1780,7 +1802,7 @@ impl Picker {
                         RowMarks {
                             icons: self.config.icons,
                             favorite: item.is_dir
-                                && browser.cwd.parent().is_some_and(|parent| {
+                                && parent_dir.as_ref().is_some_and(|parent| {
                                     self.pinned.contains(&parent.join(&item.name))
                                 }),
                             // This row is the directory the middle column is
@@ -1790,7 +1812,7 @@ impl Picker {
                     )
                 })
                 .collect();
-            if let Some(parent) = browser.cwd.parent() {
+            if let Some(parent) = &parent_dir {
                 for (row, item) in items.iter().skip(first).take(height).enumerate() {
                     self.mouse_paths.push((
                         Rect::new(
@@ -3230,6 +3252,42 @@ mod tests {
         }
 
         crate::testing::remove_tree(&root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn left_at_the_top_of_a_drive_lists_the_drives() {
+        let top = crate::testing::temp_dir()
+            .ancestors()
+            .last()
+            .unwrap()
+            .to_path_buf();
+        let mut picker = test_picker(top.clone(), Mode::Browse);
+        picker.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+        assert!(picker.browser().at_drives());
+        // The drive just left is selected, so Enter goes to it.
+        assert_eq!(picker.browser().target(), top);
+        assert_eq!(picker.selected_path(), Some(top.clone()));
+
+        // A search started from here starts at the drive selected. Favorites
+        // is used because it scans nothing.
+        picker.switch_to(Mode::Favorites);
+        assert_eq!(picker.root, top);
+
+        // With nothing matching the filter nothing is selected, and neither
+        // the actions nor pinning are handed an empty path.
+        picker.switch_to(Mode::Browse);
+        assert!(picker.browser().at_drives());
+        picker.browser().set_filter("no such drive");
+        assert_eq!(picker.selected_path(), None);
+        picker.handle_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL));
+        assert!(
+            picker
+                .notice
+                .as_deref()
+                .unwrap()
+                .starts_with("Nothing selected")
+        );
     }
 
     #[test]

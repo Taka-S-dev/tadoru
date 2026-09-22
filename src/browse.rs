@@ -18,14 +18,69 @@ pub struct Item {
 }
 
 impl Item {
-    /// Name as shown: directories carry a trailing separator.
+    /// Name as shown: directories carry a trailing separator. A drive's name
+    /// already ends in one.
     pub fn label(&self) -> String {
-        if self.is_dir {
+        if self.is_dir && !self.name.ends_with(std::path::MAIN_SEPARATOR) {
             format!("{}{}", self.name, std::path::MAIN_SEPARATOR)
         } else {
             self.name.clone()
         }
     }
+}
+
+/// The drives, listed where a drive's parent would be. Windows has no folder
+/// above a drive, so going up from the top of one comes here. These are the
+/// drive letters Windows has assigned, mapped network drives included, and
+/// none of the drives is opened to list them.
+#[cfg(windows)]
+pub fn drives() -> Vec<Item> {
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetLogicalDrives() -> u32;
+    }
+    // SAFETY: takes no arguments and only returns a bit mask.
+    let mask = unsafe { GetLogicalDrives() };
+    (0..26u8)
+        .filter(|bit| mask & (1 << bit) != 0)
+        .map(|bit| Item {
+            name: format!("{}:{}", (b'A' + bit) as char, std::path::MAIN_SEPARATOR),
+            is_dir: true,
+        })
+        .collect()
+}
+
+#[cfg(not(windows))]
+pub fn drives() -> Vec<Item> {
+    Vec::new()
+}
+
+/// The name `path` has in the list of drives, when it is the top of a drive.
+fn drive_name(path: &Path) -> Option<String> {
+    use std::path::{Component, Prefix};
+    if !cfg!(windows) || path.parent().is_some() {
+        return None;
+    }
+    let mut components = path.components();
+    let drive = match components.next()? {
+        Component::Prefix(prefix) => match prefix.kind() {
+            Prefix::Disk(drive) | Prefix::VerbatimDisk(drive) => drive,
+            _ => return None,
+        },
+        _ => return None,
+    };
+    matches!(components.next(), Some(Component::RootDir)).then(|| {
+        format!(
+            "{}:{}",
+            drive.to_ascii_uppercase() as char,
+            std::path::MAIN_SEPARATOR
+        )
+    })
+}
+
+/// The name `path` is listed under in the folder above it.
+fn name_in_parent(path: &Path) -> Option<String> {
+    drive_name(path).or_else(|| path.file_name().map(|n| n.to_string_lossy().into_owned()))
 }
 
 /// Directory contents, directories first, each group sorted case-insensitively.
@@ -45,6 +100,15 @@ pub fn read_dir(dir: &Path) -> Vec<Item> {
     items
 }
 
+/// What a folder holds, or the drives for the empty path above them.
+fn listing(dir: &Path) -> Vec<Item> {
+    if dir.as_os_str().is_empty() {
+        drives()
+    } else {
+        read_dir(dir)
+    }
+}
+
 /// One row of the middle column after filtering.
 pub struct Row {
     pub index: usize,
@@ -53,6 +117,7 @@ pub struct Row {
 }
 
 pub struct Browser {
+    /// The folder listed in the middle column. Empty for the list of drives.
     pub cwd: PathBuf,
     /// Which row is at the top of the middle column. Remembered so that moving
     /// the selection walks it up and down the window, instead of the window
@@ -89,8 +154,25 @@ impl Browser {
             back: Vec::new(),
             forward: Vec::new(),
         };
-        browser.load(cwd, None);
+        browser.load_state(cwd, None);
         browser
+    }
+
+    /// Whether the middle column lists the drives rather than a folder.
+    pub fn at_drives(&self) -> bool {
+        self.cwd.as_os_str().is_empty()
+    }
+
+    /// The folder above the one listed: a real parent, or the list of drives
+    /// (an empty path) above the top of a drive on Windows.
+    pub fn parent_dir(&self) -> Option<PathBuf> {
+        if self.at_drives() {
+            return None;
+        }
+        match self.cwd.parent() {
+            Some(parent) => Some(parent.to_path_buf()),
+            None => drive_name(&self.cwd).map(|_| PathBuf::new()),
+        }
     }
 
     pub fn items(&self) -> &[Item] {
@@ -120,7 +202,7 @@ impl Browser {
     }
 
     fn load(&mut self, dir: PathBuf, reselect: Option<&str>) {
-        if !self.cwd.as_os_str().is_empty() && self.cwd != dir {
+        if self.cwd != dir {
             let visit = self.visit();
             Self::push_visit(&mut self.back, visit);
             self.forward.clear();
@@ -164,7 +246,7 @@ impl Browser {
             let Some(visit) = visit else {
                 return false;
             };
-            if !visit.cwd.is_dir() {
+            if !(visit.cwd.as_os_str().is_empty() || visit.cwd.is_dir()) {
                 continue;
             }
             let current = self.visit();
@@ -191,11 +273,11 @@ impl Browser {
     }
 
     fn load_state(&mut self, dir: PathBuf, reselect: Option<&str>) {
-        self.items = read_dir(&dir);
+        self.items = listing(&dir);
         self.cwd = dir;
-        self.parent = self.cwd.parent().map(|parent| {
-            let items = read_dir(parent);
-            let here = self.cwd.file_name().map(|n| n.to_string_lossy());
+        self.parent = self.parent_dir().map(|parent| {
+            let items = listing(&parent);
+            let here = name_in_parent(&self.cwd);
             let pos = here.and_then(|h| items.iter().position(|i| i.name == h));
             (items, pos)
         });
@@ -230,6 +312,10 @@ impl Browser {
     /// stepped into. Browse opens this way, so the folder that was on screen a
     /// moment ago is still the one on screen, with the highlight where it was.
     pub fn reveal(&mut self, path: &Path) {
+        if let Some(drive) = drive_name(path) {
+            self.load(PathBuf::new(), Some(&drive));
+            return;
+        }
         match (path.parent(), path.file_name()) {
             (Some(parent), Some(name)) if parent.is_dir() => {
                 self.load(parent.to_path_buf(), Some(&name.to_string_lossy()));
@@ -250,15 +336,13 @@ impl Browser {
         self.load(next, None);
     }
 
-    /// Goes to the parent directory, reselecting the one just left.
+    /// Goes to the parent directory, reselecting the one just left. From the
+    /// top of a drive that is the list of drives.
     pub fn up(&mut self) {
-        let Some(parent) = self.cwd.parent().map(Path::to_path_buf) else {
+        let Some(parent) = self.parent_dir() else {
             return;
         };
-        let left = self
-            .cwd
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned());
+        let left = name_in_parent(&self.cwd);
         self.load(parent, left.as_deref());
     }
 
@@ -454,6 +538,51 @@ mod tests {
         assert_eq!(b.cwd, root);
         assert_eq!(b.target(), root);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn above_the_top_of_a_drive_are_the_drives() {
+        let temp = std::env::temp_dir();
+        let top: PathBuf = temp.ancestors().last().unwrap().to_path_buf();
+        let name = drive_name(&top).unwrap();
+        assert!(drives().iter().any(|item| item.name == name), "{name}");
+        assert_eq!(name.len(), 3, "{name}");
+
+        let mut b = Browser::new(top.clone());
+        // The column on the left lists the drives, this one marked.
+        let (items, here) = b.parent_listing().unwrap();
+        assert_eq!(items[here.unwrap()].name, name);
+        assert_eq!(items[here.unwrap()].label(), name, "no doubled separator");
+
+        b.up();
+        assert!(b.at_drives());
+        assert_eq!(b.selected_item().unwrap().name, name);
+        // Enter goes to the drive itself; Right goes into it.
+        assert_eq!(b.target(), top);
+        assert!(b.parent_listing().is_none());
+        b.up();
+        assert!(b.at_drives(), "nothing above the drives");
+        b.enter();
+        assert_eq!(b.cwd, top);
+
+        // History walks through the list of drives like any other place.
+        assert!(b.history(false));
+        assert!(b.at_drives());
+        assert!(b.history(true));
+        assert_eq!(b.cwd, top);
+
+        // With nothing matching there is nowhere for Enter to go.
+        b.up();
+        b.set_filter("no such drive");
+        assert!(b.selected_item().is_none());
+        assert!(b.target().as_os_str().is_empty());
+
+        // Revealing a drive shows it in the list rather than inside it.
+        let mut b = Browser::new(temp);
+        b.reveal(&top);
+        assert!(b.at_drives());
+        assert_eq!(b.selected_item().unwrap().name, name);
     }
 
     #[test]
