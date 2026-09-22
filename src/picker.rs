@@ -1137,6 +1137,13 @@ impl Picker {
             });
             return Action::Continue;
         }
+        // Ctrl-T goes back too, as it does after a tag jump in Vim. AltGr
+        // arrives as Ctrl+Alt on Windows and types a character, so Alt rules
+        // it out.
+        if key.code == KeyCode::Char('t') && key.modifiers == KeyModifiers::CONTROL {
+            self.navigate(Nav::Back);
+            return Action::Continue;
+        }
         // Straight to a search by its letter; favorites are the starred ones.
         // Shift-Tab only steps forward, so by that key alone favorites is
         // three presses from dirs and four from browse. Ctrl with a letter
@@ -3259,6 +3266,22 @@ mod tests {
         assert_eq!(picker.root, deep);
         picker.handle_key(ctrl(KeyCode::Right));
         assert_eq!(picker.root, middle);
+        // Ctrl-T goes back as Ctrl-Left does, as after a tag jump in Vim.
+        picker.handle_key(ctrl(KeyCode::Char('t')));
+        assert_eq!(picker.root, deep);
+        drop(picker);
+
+        let mut picker = test_picker(root.clone(), Mode::Browse);
+        picker.browser().navigate_to(&deep);
+        picker.handle_key(ctrl(KeyCode::Char('t')));
+        assert_eq!(picker.browser().cwd, root);
+        // AltGr with t types a character; it does not go back.
+        picker.handle_key(ctrl(KeyCode::Right));
+        picker.handle_key(KeyEvent::new(
+            KeyCode::Char('t'),
+            KeyModifiers::CONTROL | KeyModifiers::ALT,
+        ));
+        assert_eq!(picker.browser().cwd, deep);
 
         crate::testing::remove_tree(&root);
     }

@@ -239,11 +239,11 @@ columns mark the current folder in an accent colour.
 
 **Ctrl+← goes back and Ctrl+→ goes forward.** Alt+← and Alt+→ do the same, but if the terminal uses
 Alt with the arrows for something else, such as moving between panes, those keys never reach tadoru,
-so use Ctrl. Unlike going up a level, these follow the history of places visited. The same keys work
-in a search, where they follow the history of starting points. Moving in browse and pressing Tab
-moves the starting point, so even a starting point you wandered into is one key away from being
-undone. When the starting point changes, the bottom of the screen names the new place and how to go
-back.
+so use Ctrl. Ctrl-T goes back too, as it does after a tag jump in Vim. Unlike going up a level,
+these follow the history of places visited. The same keys work in a search, where they follow the
+history of starting points. Moving in browse and pressing Tab moves the starting point, so even a
+starting point you wandered into is one key away from being undone. When the starting point changes,
+the bottom of the screen names the new place and how to go back.
 
 Going back also brings back the filter that was typed at the time, and the filter and selection of
 the place you return to. Moving somewhere new after going back drops the forward history. The history

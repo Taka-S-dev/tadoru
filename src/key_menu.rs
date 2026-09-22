@@ -101,7 +101,7 @@ impl KeyMenu {
                 KeyCode::Left,
                 none,
             ),
-            press('[', "Back", "^Left", KeyCode::Left, ctrl),
+            press('[', "Back", "^Left ^T", KeyCode::Left, ctrl),
             press(']', "Forward", "^Right", KeyCode::Right, ctrl),
             press(
                 'a',
