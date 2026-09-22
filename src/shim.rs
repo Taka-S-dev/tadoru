@@ -351,12 +351,21 @@ set "TADORU_FROM=%CD%"
 set "TADORU_QUERY=%*"
 for /f "tokens=2 delims=:" %%c in ('chcp') do set "TADORU_CP=%%c"
 chcp 65001 >nul
-set "TADORU_RESULT=%TEMP%\tadoru-%RANDOM%-%RANDOM%.tmp"
+rem cmd seeds %RANDOM% from the clock when it starts, so shells opened in the
+rem same second draw the same names. mkdir fails on a name already taken,
+rem even by a shell racing this one, and then the next name is tried.
+set "TADORU_TRIES=0"
+:tadoru_temp
+set /a TADORU_TRIES+=1
+if %TADORU_TRIES% gtr 20 goto tadoru_no_temp
+set "TADORU_TEMP=%TEMP%\tadoru-%RANDOM%-%RANDOM%"
+mkdir "%TADORU_TEMP%" >nul 2>nul || goto tadoru_temp
+set "TADORU_RESULT=%TADORU_TEMP%\path.txt"
 {command} > "%TADORU_RESULT%"
 set "TADORU_EXIT=%ERRORLEVEL%"
 set "TADORU_PATH="
 if "%TADORU_EXIT%"=="0" for /f "usebackq delims=" %%p in ("%TADORU_RESULT%") do set "TADORU_PATH=%%p"
-del /q "%TADORU_RESULT%" >nul 2>nul
+rmdir /s /q "%TADORU_TEMP%" >nul 2>nul
 chcp %TADORU_CP% >nul
 if not "%TADORU_EXIT%"=="0" exit /b %TADORU_EXIT%
 if not defined TADORU_PATH exit /b 1
@@ -377,6 +386,10 @@ zoxide add -- "%TADORU_PATH%" 2>nul
 endlocal & pushd "%TADORU_PATH%" && set "TADORU_PREVIOUS=%TADORU_FROM%"
 if errorlevel 1 exit /b 2
 exit /b 0
+:tadoru_no_temp
+chcp %TADORU_CP% >nul
+echo tadoru: cannot create a temporary folder in "%TEMP%" 1>&2
+exit /b 2
 :tadoru_back
 if not defined TADORU_PREVIOUS (
     echo tadoru: no previous directory yet 1>&2
