@@ -264,6 +264,49 @@ exit /b 0
             .output()
             .unwrap(),
     );
+    check_cmd_goes_into_a_share(&fixture);
+}
+
+/// cmd cannot cd into a \\server\share path, so the cmd shims go there with
+/// pushd, which maps a drive letter to the share. The share used is this
+/// machine's own administrative one; without access to it the check is skipped.
+///
+/// Run from the other cmd test rather than as a test of its own: the shims
+/// switch the console's code page while reading tadoru's output, and cmd
+/// scripts run side by side from the tests share one console.
+#[cfg(windows)]
+fn check_cmd_goes_into_a_share(fixture: &Fixture) {
+    let local = fixture.destination.to_string_lossy().into_owned();
+    let (drive, rest) = local.split_once(":\\").unwrap();
+    let share = format!(r"\\localhost\{drive}$\{rest}");
+    if !Path::new(&share).is_dir() {
+        eprintln!("skipped: {share} cannot be reached");
+        return;
+    }
+    let script = r#"@echo off
+setlocal DisableDelayedExpansion
+call c.cmd test-query
+if errorlevel 1 exit /b 20
+if /i "%CD%"=="%TEST_ROOT%" exit /b 21
+if "%CD:~0,2%"=="\\" exit /b 22
+rem The drive letter shows the chosen folder: a file made there is in it.
+echo x> marker.txt
+if not exist "%TEST_LOCAL%\marker.txt" exit /b 23
+if not "%TADORU_PREVIOUS%"=="%TEST_ROOT%" exit /b 24
+popd
+if /i not "%CD%"=="%TEST_ROOT%" exit /b 25
+exit /b 0
+"#;
+    std::fs::write(fixture.root.join("share.cmd"), script.replace('\n', "\r\n")).unwrap();
+    check(
+        fixture
+            .command("cmd")
+            .env("TEST_PATH", &share)
+            .env("TEST_LOCAL", &fixture.destination)
+            .args(["/d", "/c", "share.cmd"])
+            .output()
+            .unwrap(),
+    );
 }
 
 #[test]

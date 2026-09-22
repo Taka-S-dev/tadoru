@@ -361,11 +361,20 @@ chcp %TADORU_CP% >nul
 if not "%TADORU_EXIT%"=="0" exit /b %TADORU_EXIT%
 if not defined TADORU_PATH exit /b 1
 :tadoru_move
+if "%TADORU_PATH:~0,2%"=="\\" goto tadoru_share
 cd /d "%TADORU_PATH%"
 if errorlevel 1 exit /b 2
 zoxide add -- "%TADORU_PATH%" 2>nul
 if /i "%TADORU_FROM%"=="%CD%" set "TADORU_FROM=%TADORU_PREVIOUS%"
 endlocal & cd /d "%TADORU_PATH%" && set "TADORU_PREVIOUS=%TADORU_FROM%"
+if errorlevel 1 exit /b 2
+exit /b 0
+:tadoru_share
+rem cmd cannot cd into a \\server\share path. pushd maps a free drive
+rem letter to the share and goes there; popd comes back and frees it.
+if not exist "%TADORU_PATH%\" exit /b 2
+zoxide add -- "%TADORU_PATH%" 2>nul
+endlocal & pushd "%TADORU_PATH%" && set "TADORU_PREVIOUS=%TADORU_FROM%"
 if errorlevel 1 exit /b 2
 exit /b 0
 :tadoru_back

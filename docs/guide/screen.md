@@ -127,6 +127,10 @@ still be opened one at a time. The folder the scan root links to is checked too,
 such as junctions are not followed during a scan. `browse` still works, but listing and previewing
 folders does go over the network. Network mounts on Linux and macOS are not detected.
 
+cmd cannot use a `\\server\share` path as its current folder, so in cmd a chosen folder on a share
+is entered with `pushd`: Windows gives the share a free drive letter, such as `Z:`, and cmd goes
+there. `popd` comes back to where you were and frees the letter.
+
 ## The list of keys
 
 **Ctrl-Space** opens a panel at the bottom right that lists what tadoru can do, one row each:
