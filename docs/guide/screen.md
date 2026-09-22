@@ -146,6 +146,14 @@ Only Ctrl-Space itself has to get through the terminal. If the terminal keeps on
 for itself, the letter in the panel still works. Where Ctrl-Space is taken, by an input method for
 example, the shortcuts and the mouse are what is left.
 
+Ctrl-J and Ctrl-K move the selection down and up, and Ctrl-H deletes a letter as Backspace does, in
+every list and in the action menu's filter. Some terminals send Ctrl-H for the Backspace key itself,
+and there it still deletes. With nothing left to delete, Backspace and Ctrl-H go up: a level in
+browse, and in a search one level wider, as Left does. Held down to clear what was typed, they stop
+at the empty filter; let go and press again to go up. tadoru hears a key being let go only on
+Windows, so elsewhere press again after a pause of about a second and a half, or after any other
+key. Ctrl-L does what Right does.
+
 ## Modes and favorites
 
 **Tab** goes between the search and browse. The search is one of dirs, files, recent and favorites,

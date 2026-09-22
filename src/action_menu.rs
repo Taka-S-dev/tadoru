@@ -139,7 +139,7 @@ impl Menu {
             (KeyCode::Down, _) | (KeyCode::Char('j'), true) => {
                 self.selected = (self.selected + 1).min(self.visible.len().saturating_sub(1))
             }
-            (KeyCode::Backspace, _) => {
+            (KeyCode::Backspace, _) | (KeyCode::Char('h'), true) => {
                 self.query.pop();
                 self.filter();
             }
@@ -824,6 +824,9 @@ mod tests {
         assert_eq!(menu.visible, [0, 1]);
         menu.handle(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
         assert_eq!(menu.query, "d");
+        // Ctrl-H deletes as Backspace does, as in the picker.
+        menu.handle(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::CONTROL));
+        assert!(menu.query.is_empty());
     }
 
     #[test]
