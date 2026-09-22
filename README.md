@@ -90,7 +90,7 @@ Esc clears the filter, and pressed again on an empty filter it quits. Ctrl-C alw
 | Key | What it does |
 |---|---|
 | Ctrl-Space | Open the list of keys. A plain letter there runs one, such as `s` for favorites; Esc closes it |
-| Ctrl-Space, then v | Draw browse as a tree whose folders open in place, or go back to the columns |
+| Ctrl-Space, then v | Draw browse as a tree whose folders open in place and where typing searches everything below, or go back to the columns |
 | Tab | Go between the search and browse, back to the search used last |
 | Shift-Tab | Change to the next kind of search. In browse, go back to the search |
 | Ctrl-D / Ctrl-F / Ctrl-R / Ctrl-S | Go straight to dirs, files, recent or favorites (S for starred) |

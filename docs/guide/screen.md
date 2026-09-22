@@ -122,9 +122,10 @@ easiest way to hit the limit, so go back somewhere deeper before switching.
 On Windows, recursive `dirs` and `files` scans of network locations are refused before they start.
 This covers UNC paths, drive letters mapped to network drives, and drives whose type cannot be
 determined. When a scan is refused, press Tab to switch to `browse`; F5 does not lift the
-restriction. The folder the scan root links to is checked too, and reparse points such as junctions
-are not followed during a scan. `browse` still works, but listing and previewing folders does go
-over the network. Network mounts on Linux and macOS are not detected.
+restriction. Typing in the tree view is refused the same way, and the tree says so; its folders can
+still be opened one at a time. The folder the scan root links to is checked too, and reparse points
+such as junctions are not followed during a scan. `browse` still works, but listing and previewing
+folders does go over the network. Network mounts on Linux and macOS are not detected.
 
 ## The list of keys
 
@@ -301,4 +302,15 @@ Enter goes to the selected folder, or to the folder holding the selected file; o
 goes to the folder browse is in. The tree starts on the item that was selected in the columns, and
 going back to the columns selects the item chosen in the tree. Moving the top of the tree up is kept
 in browse's history, so Ctrl+← and Ctrl-T come back. F5 reads the open folders again and keeps them
-open. Typing does nothing in the tree yet.
+open.
+
+Typing in the tree searches everything under its top line, folders and files alike, as the search
+screens do. The best matches are shown under the folders they sit in, with those folders dimmed
+unless they match too, and the best one is selected. The letters that matched are coloured as in the
+lists, in the folders on the way too when the match runs through them; the line under the prompt
+says how many matched and how many of them are shown. While the scan is still finding matches the
+selection follows the best one, until you move it. Enter goes there. Right leaves the search for the
+tree of folders, opened down to the match, so a search can find the place and the tree go on from
+there. Esc clears what was typed, and Backspace deletes a letter and then goes up as it does
+elsewhere. The search starts when the first letter is typed and follows the same scan limit and
+skipped folders as dirs and files.

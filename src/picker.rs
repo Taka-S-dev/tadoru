@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -236,6 +237,31 @@ struct Picker {
     /// The tree, rooted where browse is. Built when first drawn and again
     /// whenever browse has moved somewhere else.
     tree: Option<crate::tree::Tree>,
+    /// What is typed in the tree, which searches everything under its root.
+    tree_query: String,
+    /// The scan behind that search: folders and files under the tree's root,
+    /// started at the first letter typed.
+    tree_search: Option<Source>,
+    /// The folder that scan walked. The tree's root can move without the
+    /// tree being built again, as Left on its top line does, and a scan of
+    /// the old root must not answer for the new one.
+    tree_search_root: PathBuf,
+    /// The best matches of that search, under their folders. Shown instead
+    /// of the tree while something is typed.
+    found: Option<crate::tree::Tree>,
+    /// Whether the row selected in `found` is kept when it is built again as
+    /// more matches arrive: only once the reader has moved it. Until then the
+    /// best match so far is selected, and a new query starts over.
+    found_keep: bool,
+    /// The matched characters of each row in `found`, as char positions in
+    /// its name.
+    found_marks: HashMap<PathBuf, Vec<u32>>,
+    /// Rows the tree had on screen last time, so a search collects about as
+    /// many matches as can be shown.
+    tree_rows: usize,
+    /// Whether each path shown by the search is a folder, so it is asked of
+    /// the disk once rather than on every rebuild.
+    tree_dirs: HashMap<PathBuf, bool>,
     /// The scan root browse was last lined up with.
     ///
     /// Browse keeps where it was, so flipping between it and a search stays
@@ -363,6 +389,14 @@ pub fn run(args: PickArgs, root: PathBuf, config: Config) -> Result<Option<PathB
         keys: None,
         tree_view: false,
         tree: None,
+        tree_query: String::new(),
+        tree_search: None,
+        tree_search_root: PathBuf::new(),
+        found: None,
+        found_keep: false,
+        found_marks: HashMap::new(),
+        tree_rows: 20,
+        tree_dirs: HashMap::new(),
         origin: place_mode(args.mode),
         mouse_rows: (Rect::default(), 0, 0),
         mouse_header: Rect::default(),
@@ -457,6 +491,10 @@ impl Picker {
     }
 
     fn set_query(&mut self, query: &str) {
+        if self.in_tree() {
+            self.set_tree_query(query);
+            return;
+        }
         if self.mode == Mode::Browse {
             self.browser().set_filter(query);
             return;
@@ -478,10 +516,148 @@ impl Picker {
     fn tree(&mut self) -> &mut crate::tree::Tree {
         let root = self.browser().cwd.clone();
         if self.tree.as_ref().is_none_or(|tree| tree.root != root) {
+            // A search covers the root it was typed under, so it ends there.
+            self.end_tree_search();
             let select = self.browser().selected_path();
             self.tree = Some(crate::tree::Tree::new(root, select.as_deref()));
         }
         self.tree.as_mut().expect("just built")
+    }
+
+    /// The tree on screen: the search's matches while something is typed,
+    /// the tree of folders otherwise.
+    fn shown_tree(&mut self) -> &mut crate::tree::Tree {
+        if self.found.is_none() {
+            return self.tree();
+        }
+        self.found.as_mut().expect("a search is shown")
+    }
+
+    fn end_tree_search(&mut self) {
+        self.tree_query.clear();
+        self.found = None;
+        self.found_marks.clear();
+        self.tree_dirs.clear();
+        if let Some(source) = self.tree_search.take() {
+            source.retire();
+        }
+    }
+
+    /// Types into the tree. The first letter starts a scan of everything
+    /// under the root; the matches arrive as it goes.
+    fn set_tree_query(&mut self, query: &str) {
+        if query.is_empty() {
+            self.tree_query.clear();
+            self.found = None;
+            self.found_marks.clear();
+            // The scan is kept for the next query, which then starts from
+            // nothing rather than from this one.
+            if let Some(source) = self.tree_search.as_mut() {
+                source.set_query("", false);
+            }
+            return;
+        }
+        let root = self.tree().root.clone();
+        if root.as_os_str().is_empty() {
+            self.set_notice("Open a drive to search it".into());
+            return;
+        }
+        let append = query.starts_with(&self.tree_query);
+        self.tree_query = query.to_string();
+        if self.tree_search_root != root
+            && let Some(stale) = self.tree_search.take()
+        {
+            stale.retire();
+        }
+        if self.tree_search.is_none() {
+            self.tree_search_root = root.clone();
+            let limit = if self.unlimited {
+                0
+            } else {
+                self.config.scan_limit
+            };
+            self.tree_search = Some(Source::start(Mode::Browse, &root, &self.config, limit));
+        }
+        let source = self.tree_search.as_mut().expect("just started");
+        source.set_query(query, append);
+        source.matcher.tick(TICK_MS);
+        self.found_keep = false;
+        self.rebuild_found();
+    }
+
+    /// Builds the tree of the best matches again. The best match is selected,
+    /// unless the reader has moved the selection since the query changed.
+    fn rebuild_found(&mut self) {
+        // Asked for first: it ends the search when the tree has moved to
+        // another folder since, as going back in history moves it, and the
+        // matches of the old folder must not be built under the new one.
+        let root = self.tree().root.clone();
+        let Some(source) = self.tree_search.as_ref() else {
+            return;
+        };
+        let snapshot = source.matcher.snapshot();
+        let take = snapshot
+            .matched_item_count()
+            .min(self.tree_rows.max(20) as u32);
+        let pattern = snapshot.pattern().column_pattern(0);
+        let mut marks = HashMap::new();
+        let mut indices = Vec::new();
+        let mut paths = Vec::new();
+        for item in (0..take).filter_map(|n| snapshot.get_matched_item(n)) {
+            indices.clear();
+            pattern.indices(
+                item.matcher_columns[0].slice(..),
+                &mut self.highlighter,
+                &mut indices,
+            );
+            indices.sort_unstable();
+            indices.dedup();
+            let path = item.data.path();
+            spread_marks(&path, &item.data.display, &indices, &mut marks);
+            paths.push(path);
+        }
+        self.found_marks = marks;
+        let matches: Vec<(PathBuf, bool)> = paths
+            .into_iter()
+            .map(|path| {
+                let is_dir = *self
+                    .tree_dirs
+                    .entry(path.clone())
+                    .or_insert_with(|| path.is_dir());
+                (path, is_dir)
+            })
+            .collect();
+        let keep = self
+            .found
+            .as_ref()
+            .filter(|_| self.found_keep)
+            .and_then(|tree| tree.selected_path());
+        let mut found = crate::tree::Tree::from_matches(root, &matches);
+        if let Some(path) = keep
+            && let Some(index) = found.nodes().iter().position(|node| node.path == path)
+        {
+            found.selected = index;
+        }
+        self.found = Some(found);
+    }
+
+    /// Moves the tree's search on while matches arrive. Says whether anything
+    /// on screen may have changed.
+    fn tick_tree_search(&mut self) -> bool {
+        // Ends the search first when the tree has moved to another folder,
+        // as going back in history moves it; the old folder's matches would
+        // otherwise stay on screen until the next draw.
+        self.tree();
+        let Some(source) = self.tree_search.as_mut() else {
+            return false;
+        };
+        let just_finished = source.collect_scan_result();
+        let busy = !source.scan_done.load(Ordering::Acquire);
+        let status = source.matcher.tick(if busy { TICK_MS } else { 0 });
+        if (status.changed || just_finished) && !self.tree_query.is_empty() {
+            self.rebuild_found();
+        }
+        just_finished || status.changed || status.running || busy
     }
 
     fn in_tree(&self) -> bool {
@@ -498,7 +674,12 @@ impl Picker {
             return;
         }
         if self.tree_view {
-            let selected = self.tree.as_ref().and_then(|tree| tree.selected_path());
+            let selected = self
+                .found
+                .as_ref()
+                .or(self.tree.as_ref())
+                .and_then(|tree| tree.selected_path());
+            self.end_tree_search();
             if let Some(path) = selected
                 && path != self.browser().cwd
             {
@@ -528,24 +709,67 @@ impl Picker {
 
     fn handle_tree_key(&mut self, key: KeyEvent) -> Action {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let searching = self.found.is_some();
+        if searching
+            && matches!(
+                (key.code, ctrl),
+                (
+                    KeyCode::Up | KeyCode::Down | KeyCode::PageUp | KeyCode::PageDown,
+                    _
+                ) | (KeyCode::Char('j' | 'k'), true)
+                    | (KeyCode::Left, _)
+            )
+        {
+            self.found_keep = true;
+        }
         if is_erase(&key) {
-            // Nothing is typed in the tree yet, so Backspace goes up as
-            // it does in the columns once the filter is empty.
-            if self.erase(false) {
+            // Backspace deletes what was typed, and with nothing left goes
+            // up as it does in the columns.
+            let has_text = !self.tree_query.is_empty();
+            if self.erase(has_text) {
                 self.tree_left();
+            } else if has_text {
+                let mut query = self.tree_query.clone();
+                query.pop();
+                self.set_tree_query(&query);
             }
             return Action::Continue;
         }
         match (key.code, ctrl) {
+            // In a search Left walks up the matches' folders; the root stays.
+            (KeyCode::Left, _) if searching => {
+                self.shown_tree().left();
+            }
             (KeyCode::Left, _) => self.tree_left(),
+            // Right on a match goes back to the tree of folders, opened down
+            // to it: a search finds the place, and the tree goes on from there.
+            (KeyCode::Right, _) | (KeyCode::Char('l'), true) if searching => {
+                self.leave_tree_search();
+            }
             (KeyCode::Right, _) | (KeyCode::Char('l'), true) => self.tree().right(),
-            (KeyCode::Up, _) | (KeyCode::Char('k'), true) => self.tree().move_selection(-1),
-            (KeyCode::Down, _) | (KeyCode::Char('j'), true) => self.tree().move_selection(1),
-            (KeyCode::PageUp, _) => self.tree().move_selection(-10),
-            (KeyCode::PageDown, _) => self.tree().move_selection(10),
+            (KeyCode::Up, _) | (KeyCode::Char('k'), true) => self.shown_tree().move_selection(-1),
+            (KeyCode::Down, _) | (KeyCode::Char('j'), true) => self.shown_tree().move_selection(1),
+            (KeyCode::PageUp, _) => self.shown_tree().move_selection(-10),
+            (KeyCode::PageDown, _) => self.shown_tree().move_selection(10),
+            (KeyCode::Char('u'), true) => self.set_tree_query(""),
+            (KeyCode::Char(c), false) if crate::keys::is_typed_text(&key) => {
+                let mut query = self.tree_query.clone();
+                query.push(c);
+                self.set_tree_query(&query);
+            }
             _ => {}
         }
         Action::Continue
+    }
+
+    /// Leaves the tree's search for the tree of folders, opened down to the
+    /// selected match: a search finds the place, and the tree goes on from
+    /// there.
+    fn leave_tree_search(&mut self) {
+        if let Some(path) = self.shown_tree().selected_path() {
+            self.set_tree_query("");
+            self.tree().reveal(&path);
+        }
     }
 
     /// Leaves a search for browse at `path`: inside a folder, or beside a file
@@ -750,6 +974,9 @@ impl Picker {
                 // move on their own.
                 dirty |= just_finished || status.changed || status.running || busy;
             }
+            if self.in_tree() {
+                dirty |= self.tick_tree_search();
+            }
             dirty |= self.expire_notice();
             // Draw only once the input queue is empty. A burst of scroll
             // events then costs one redraw at the end instead of one per
@@ -860,7 +1087,7 @@ impl Picker {
                 Action::Accept => {
                     if self.mode == Mode::Browse {
                         let target = if self.tree_view {
-                            self.tree().target()
+                            self.shown_tree().target()
                         } else {
                             self.browser().target()
                         };
@@ -883,7 +1110,7 @@ impl Picker {
     /// file, not its parent). Browse mode falls back to the directory shown.
     fn selected_path(&mut self) -> Option<PathBuf> {
         if self.in_tree() {
-            return self.tree().selected_path();
+            return self.shown_tree().selected_path();
         }
         if self.mode == Mode::Browse {
             let b = self.browser();
@@ -985,7 +1212,7 @@ impl Picker {
             return;
         }
         let selected = if self.in_tree() {
-            self.tree().selected
+            self.shown_tree().selected
         } else if self.mode == Mode::Browse {
             self.browser().selected
         } else {
@@ -1004,9 +1231,10 @@ impl Picker {
             _ => return,
         };
         if self.in_tree() {
-            self.tree().selected = next;
+            self.shown_tree().selected = next;
+            self.found_keep = self.found.is_some();
             if mouse.kind == MouseEventKind::Down(MouseButton::Left)
-                && let Some(path) = self.tree().selected_path()
+                && let Some(path) = self.shown_tree().selected_path()
             {
                 // A double click opens or closes the folder, as in a file
                 // tree side panel.
@@ -1020,7 +1248,12 @@ impl Picker {
                             && y == mouse.row
                             && now.duration_since(time) <= Duration::from_millis(500)
                     });
-                if double {
+                // In a search, opening a folder would read it into the list
+                // of matches, where what it holds would pass for matches; so
+                // there a double click leaves the search, as Right does.
+                if double && self.found.is_some() {
+                    self.leave_tree_search();
+                } else if double {
                     self.tree().toggle();
                 } else {
                     self.last_click = Some((path, mouse.column, mouse.row, now));
@@ -1319,7 +1552,7 @@ impl Picker {
             }
             (KeyCode::Char('b'), true) => {
                 let target = if self.in_tree() {
-                    Some(self.tree().target()).filter(|path| !path.as_os_str().is_empty())
+                    Some(self.shown_tree().target()).filter(|path| !path.as_os_str().is_empty())
                 } else if self.mode == Mode::Browse {
                     Some(self.browser().target()).filter(|path| !path.as_os_str().is_empty())
                 } else {
@@ -1363,7 +1596,9 @@ impl Picker {
                 return Action::Continue;
             }
             (KeyCode::Esc, _) => {
-                let has_filter = if self.mode == Mode::Browse {
+                let has_filter = if self.in_tree() {
+                    !self.tree_query.is_empty()
+                } else if self.mode == Mode::Browse {
                     !self.browser().filter.is_empty()
                 } else {
                     !self.query.is_empty()
@@ -1686,7 +1921,7 @@ impl Picker {
         if let Some(error) = &source.scan_error {
             frame.render_widget(
                 Paragraph::new(format!(
-                    "Cannot load {}: {error}\nF5: retry  Shift-Tab: other list  Esc: cancel",
+                    "Cannot load {}: {error}\nTab: browse  F5: retry  Shift-Tab: other list  Esc: cancel",
                     mode.label()
                 ))
                 .style(Style::default().fg(Color::Red))
@@ -1843,7 +2078,7 @@ impl Picker {
             [area, Rect::default()]
         };
         if show_preview {
-            let dir = self.tree().selected_path().filter(|p| p.is_dir());
+            let dir = self.shown_tree().selected_path().filter(|p| p.is_dir());
             self.render_preview(preview_area, frame, dir.as_deref());
         }
         let block = Block::default()
@@ -1881,18 +2116,59 @@ impl Picker {
         let location = self.browse_location(header_area);
         frame.render_widget(Paragraph::new(Line::from(location)), header_area);
         frame.render_widget(
-            Paragraph::new(Span::styled("> ", theme::PROMPT)),
+            Paragraph::new(Line::from(vec![
+                Span::styled("> ", theme::PROMPT),
+                Span::raw(self.tree_query.clone()),
+            ])),
             prompt_area,
         );
         if prompt_area.width > 2 {
-            frame.set_cursor_position((prompt_area.x + 2, prompt_area.y));
+            let x = (2 + self.tree_query.width()).min(prompt_area.width as usize - 1);
+            frame.set_cursor_position((prompt_area.x + x as u16, prompt_area.y));
         }
-        let label = " tree ";
+        // While searching: how many matched, and how many of them are shown.
+        let label = match (&self.tree_search, &self.found) {
+            // The scan was refused, as on a network drive: the folders can
+            // still be opened one at a time.
+            (Some(source), _) if source.scan_error.is_some() => format!(
+                " Not searched: {} Right opens folders one at a time. ",
+                source.scan_error.as_deref().unwrap_or_default()
+            ),
+            (Some(source), Some(found)) => {
+                let snapshot = source.matcher.snapshot();
+                let count = snapshot.matched_item_count();
+                let shown = found.nodes().iter().filter(|node| !node.dim).count() - 1;
+                let spinner = if source.scan_done.load(Ordering::Acquire) {
+                    ' '
+                } else {
+                    self.frame_count = self.frame_count.wrapping_add(1);
+                    SPINNER[(self.frame_count / 4) as usize % SPINNER.len()]
+                };
+                let truncated = if source.truncated.load(Ordering::Acquire) {
+                    ", stopped at scan_limit"
+                } else {
+                    ""
+                };
+                if (count as usize) > shown {
+                    format!(
+                        "{spinner} {count}/{} matched, best {shown} shown{truncated} ",
+                        snapshot.item_count()
+                    )
+                } else {
+                    format!(
+                        "{spinner} {count}/{} matched{truncated} ",
+                        snapshot.item_count()
+                    )
+                }
+            }
+            _ => " tree ".to_string(),
+        };
+        let label = label.as_str();
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled(label, theme::INFO),
                 Span::styled(
-                    "─".repeat((info_area.width as usize).saturating_sub(label.len())),
+                    "─".repeat((info_area.width as usize).saturating_sub(label.width())),
                     theme::BORDER,
                 ),
             ])),
@@ -1900,8 +2176,13 @@ impl Picker {
         );
 
         self.tree();
+        self.tree_rows = rows_area.height as usize;
         let icons = self.config.icons;
-        let tree = self.tree.as_mut().expect("built above");
+        let found_marks = &self.found_marks;
+        let tree = match self.found.as_mut() {
+            Some(found) => found,
+            None => self.tree.as_mut().expect("built above"),
+        };
         let height = rows_area.height as usize;
         let count = tree.nodes().len();
         tree.first = scroll_window(tree.first, tree.selected, count, height);
@@ -1922,11 +2203,14 @@ impl Picker {
                 };
                 let icon = marks.prefix(&node.label, node.is_dir);
                 let room = width.saturating_sub(2 + node.guide.width() + icon.width());
-                let style = match (current, node.depth == 0, node.is_dir) {
-                    (true, _, _) => theme::CURRENT,
-                    (false, true, _) => theme::HERE_PATH,
-                    (false, false, true) => theme::DIR,
-                    (false, false, false) => Style::default(),
+                // Folders shown only because a match sits in them are dimmed,
+                // so the matches themselves stand out.
+                let style = match (current, node.depth == 0, node.dim, node.is_dir) {
+                    (true, _, _, _) => theme::CURRENT,
+                    (false, true, _, _) => theme::HERE_PATH,
+                    (false, false, true, _) => theme::SIDE_DIR,
+                    (false, false, false, true) => theme::DIR,
+                    (false, false, false, false) => Style::default(),
                 };
                 let pointer = if current {
                     Span::styled("▌ ", theme::POINTER)
@@ -1934,12 +2218,19 @@ impl Picker {
                     Span::raw("  ")
                 };
                 ListItem::new(
-                    Line::from(vec![
-                        pointer,
-                        Span::styled(node.guide.clone(), theme::BORDER),
-                        icons::span(icon),
-                        Span::raw(fit(&node.label, room)),
-                    ])
+                    Line::from(
+                        vec![
+                            pointer,
+                            Span::styled(node.guide.clone(), theme::BORDER),
+                            icons::span(icon),
+                        ]
+                        .into_iter()
+                        .chain(match_spans(
+                            &fit(&node.label, room),
+                            found_marks.get(&node.path).map_or(&[], Vec::as_slice),
+                        ))
+                        .collect::<Vec<_>>(),
+                    )
                     .style(style),
                 )
             })
@@ -2174,7 +2465,7 @@ impl Picker {
     /// The directory whose contents the preview pane should show.
     fn preview_target(&mut self) -> Option<PathBuf> {
         if self.in_tree() {
-            return self.tree().selected_path().filter(|p| p.is_dir());
+            return self.shown_tree().selected_path().filter(|p| p.is_dir());
         }
         if self.mode == Mode::Browse {
             return self.browser().selected_path().filter(|p| p.is_dir());
@@ -2683,13 +2974,20 @@ const SPINNER: [char; 4] = ['|', '/', '-', '\\'];
 /// Builds one row, colouring the characters at `indices` (sorted, char positions).
 /// The current row gets fzf's pointer bar in the gutter.
 fn highlight_line(current: bool, text: &str, indices: &[u32]) -> Line<'static> {
-    let matched = theme::MATCH;
     let pointer = if current {
         Span::styled("▌ ", theme::POINTER)
     } else {
         Span::raw("  ")
     };
     let mut spans = vec![pointer];
+    spans.extend(match_spans(text, indices));
+    Line::from(spans)
+}
+
+/// `text` in runs, the characters at `indices` (sorted, char positions) coloured.
+fn match_spans(text: &str, indices: &[u32]) -> Vec<Span<'static>> {
+    let matched = theme::MATCH;
+    let mut spans = Vec::new();
     let mut next = indices.iter().peekable();
     let mut run_start = 0;
     let mut run_hit = false;
@@ -2709,7 +3007,41 @@ fn highlight_line(current: bool, text: &str, indices: &[u32]) -> Line<'static> {
         let style = if run_hit { matched } else { Style::default() };
         spans.push(Span::styled(text[run_start..].to_string(), style));
     }
-    Line::from(spans)
+    spans
+}
+
+/// Shares out the matched characters of `display`, a path relative to the
+/// tree's root, among the rows that show it: each folder on the way and the
+/// match itself, as positions in that row's name. A row keeps its own match
+/// over one passing through it, and otherwise the best match that reaches it.
+fn spread_marks(
+    path: &Path,
+    display: &str,
+    indices: &[u32],
+    marks: &mut HashMap<PathBuf, Vec<u32>>,
+) {
+    let names: Vec<&str> = display.split(std::path::is_separator).collect();
+    let mut row = path.to_path_buf();
+    // From the name at the end back to the first folder, so `row` climbs
+    // along with the names.
+    let mut end = display.chars().count() as u32;
+    for (k, name) in names.iter().enumerate().rev() {
+        let start = end - name.chars().count() as u32;
+        let own: Vec<u32> = indices
+            .iter()
+            .filter(|&&i| i >= start && i < end)
+            .map(|&i| i - start)
+            .collect();
+        if k == names.len() - 1 {
+            marks.insert(row.clone(), own);
+        } else if !own.is_empty() {
+            marks.entry(row.clone()).or_insert(own);
+        }
+        end = start.saturating_sub(1);
+        if !row.pop() {
+            break;
+        }
+    }
 }
 
 /// The whole window.
@@ -2920,6 +3252,14 @@ mod tests {
             keys: None,
             tree_view: false,
             tree: None,
+            tree_query: String::new(),
+            tree_search: None,
+            tree_search_root: PathBuf::new(),
+            found: None,
+            found_keep: false,
+            found_marks: HashMap::new(),
+            tree_rows: 20,
+            tree_dirs: HashMap::new(),
             origin: place_mode(mode),
             browser_root: PathBuf::new(),
             search_mode: first_search(mode),
@@ -3610,6 +3950,255 @@ mod tests {
         assert_eq!(picker.root, inner);
         picker.switch_to(Mode::Browse);
         assert!(picker.in_tree());
+        drop(picker);
+        crate::testing::remove_tree(&root);
+    }
+
+    #[test]
+    fn going_back_in_history_during_a_tree_search_shows_the_new_folder() {
+        let root =
+            crate::testing::temp_dir().join(format!("tadoru-treehist-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("a/inner")).unwrap();
+        std::fs::write(root.join("a/gauge.rs"), "").unwrap();
+        let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+        let mut picker = test_picker(root.join("a"), Mode::Browse);
+        picker.tree_view = true;
+        // Move up, so that there is somewhere to go back to, then search.
+        picker.tree().selected = 0;
+        picker.handle_key(key(KeyCode::Left));
+        assert_eq!(picker.tree().root, root);
+        picker.handle_key(key(KeyCode::Char('g')));
+        picker.tree_search.as_mut().unwrap().finish_scan();
+        while picker
+            .tree_search
+            .as_mut()
+            .unwrap()
+            .matcher
+            .tick(TICK_MS)
+            .running
+        {}
+        picker.rebuild_found();
+        assert!(picker.found.is_some());
+
+        // Ctrl-Left: back to a. The next pass of the run loop ticks the
+        // search before drawing, as run_tui does.
+        picker.navigate(Nav::Back);
+        picker.tick_tree_search();
+        assert_eq!(picker.browser().cwd, root.join("a"));
+        assert!(
+            picker.found.is_none(),
+            "the search of another folder is over"
+        );
+        assert!(picker.tree_query.is_empty());
+        let labels: Vec<&str> = picker
+            .tree()
+            .nodes()
+            .iter()
+            .map(|n| n.label.as_str())
+            .collect();
+        assert!(labels.iter().any(|l| l.starts_with("inner")), "{labels:?}");
+        drop(picker);
+        crate::testing::remove_tree(&root);
+    }
+
+    #[test]
+    fn a_double_click_on_a_match_leaves_the_search_as_right_does() {
+        let root =
+            crate::testing::temp_dir().join(format!("tadoru-treeclick-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("src/ui")).unwrap();
+        std::fs::write(root.join("src/ui/gauge.rs"), "").unwrap();
+        std::fs::write(root.join("src/other.rs"), "").unwrap();
+        let mut picker = test_picker(root.clone(), Mode::Browse);
+        picker.tree_view = true;
+        for c in "src".chars() {
+            picker.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+        picker.tree_search.as_mut().unwrap().finish_scan();
+        while picker
+            .tree_search
+            .as_mut()
+            .unwrap()
+            .matcher
+            .tick(TICK_MS)
+            .running
+        {}
+        picker.rebuild_found();
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 14)).unwrap();
+        terminal
+            .draw(|frame| picker.render(frame.area(), frame))
+            .unwrap();
+        let (area, first, _) = picker.mouse_rows;
+        let row = picker
+            .found
+            .as_ref()
+            .unwrap()
+            .nodes()
+            .iter()
+            .position(|n| n.path == root.join("src"))
+            .unwrap();
+        let click = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: area.x + 3,
+            row: area.y + (row - first) as u16,
+            modifiers: KeyModifiers::NONE,
+        };
+        picker.handle_mouse(click);
+        picker.handle_mouse(click);
+        // Not a folder read into the list of matches, where what it holds
+        // would pass for matches: the tree of folders, opened to src.
+        assert!(picker.found.is_none(), "still in the search");
+        assert!(picker.tree_query.is_empty());
+        assert_eq!(picker.selected_path(), Some(root.join("src")));
+        drop(picker);
+        crate::testing::remove_tree(&root);
+    }
+
+    #[test]
+    fn a_search_after_the_tree_moves_up_covers_the_new_top() {
+        let root = crate::testing::temp_dir().join(format!("tadoru-treeup-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("a/inner")).unwrap();
+        std::fs::create_dir_all(root.join("b")).unwrap();
+        std::fs::write(root.join("b/openssl.h"), "").unwrap();
+        let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+        let settle = |picker: &mut Picker| {
+            picker.tree_search.as_mut().unwrap().finish_scan();
+            while picker
+                .tree_search
+                .as_mut()
+                .unwrap()
+                .matcher
+                .tick(TICK_MS)
+                .running
+            {}
+            picker.rebuild_found();
+        };
+
+        // A search in a, cleared, keeps its scan of a for the next query.
+        let mut picker = test_picker(root.join("a"), Mode::Browse);
+        picker.tree_view = true;
+        picker.handle_key(key(KeyCode::Char('x')));
+        settle(&mut picker);
+        picker.handle_key(key(KeyCode::Esc));
+        // Left on the top line moves the tree up to root.
+        picker.tree().selected = 0;
+        picker.handle_key(key(KeyCode::Left));
+        assert_eq!(picker.tree().root, root);
+
+        // The next search covers root, not the a it was scanned under.
+        for c in "openssl".chars() {
+            picker.handle_key(key(KeyCode::Char(c)));
+        }
+        settle(&mut picker);
+        assert_eq!(
+            picker.selected_path(),
+            Some(root.join("b").join("openssl.h"))
+        );
+        drop(picker);
+        crate::testing::remove_tree(&root);
+    }
+
+    #[test]
+    fn typing_in_the_tree_searches_everything_under_it() {
+        let root =
+            crate::testing::temp_dir().join(format!("tadoru-treefind-{}", std::process::id()));
+        let deep = root.join("src/ui/widgets");
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        std::fs::write(deep.join("gauge.rs"), "").unwrap();
+        std::fs::write(root.join("docs/notes.md"), "").unwrap();
+        let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
+        let settle = |picker: &mut Picker| {
+            picker.tree_search.as_mut().unwrap().finish_scan();
+            while picker
+                .tree_search
+                .as_mut()
+                .unwrap()
+                .matcher
+                .tick(TICK_MS)
+                .running
+            {}
+            picker.rebuild_found();
+        };
+
+        let mut picker = test_picker(root.clone(), Mode::Browse);
+        picker.tree_view = true;
+        for c in "gauge".chars() {
+            picker.handle_key(key(c));
+        }
+        settle(&mut picker);
+        // The match is shown under its folders, which are dimmed, and is
+        // selected; Enter goes to the folder holding it.
+        let found = picker.found.as_ref().unwrap();
+        let shown: Vec<(PathBuf, bool)> = found
+            .nodes()
+            .iter()
+            .skip(1)
+            .map(|node| (node.path.clone(), node.dim))
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                (root.join("src"), true),
+                (root.join("src/ui"), true),
+                (deep.clone(), true),
+                (deep.join("gauge.rs"), false),
+            ]
+        );
+        assert_eq!(picker.selected_path(), Some(deep.join("gauge.rs")));
+        // The letters that matched are coloured in its name, as in the lists.
+        assert_eq!(
+            picker.found_marks.get(&deep.join("gauge.rs")),
+            Some(&vec![0, 1, 2, 3, 4])
+        );
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 14)).unwrap();
+        terminal
+            .draw(|frame| picker.render(frame.area(), frame))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let cells = |y: u16| {
+            (0..100u16)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<Vec<_>>()
+        };
+        let row = (0..14u16)
+            .find(|&y| cells(y).concat().contains("gauge.rs"))
+            .expect("the match is drawn");
+        let line = cells(row);
+        let at = (0..100 - 8)
+            .find(|&x| line[x..x + 8].concat() == "gauge.rs")
+            .unwrap() as u16;
+        assert_eq!(buffer[(at, row)].fg, theme::MATCH.fg.unwrap());
+        assert_ne!(buffer[(at + 5, row)].fg, theme::MATCH.fg.unwrap());
+        assert!(matches!(
+            picker.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            Action::Accept
+        ));
+        assert_eq!(picker.shown_tree().target(), deep);
+
+        // Right leaves the search for the tree of folders, opened down to it.
+        picker.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+        assert!(picker.found.is_none());
+        assert!(picker.tree_query.is_empty());
+        assert_eq!(picker.selected_path(), Some(deep.join("gauge.rs")));
+        assert!(
+            picker
+                .tree()
+                .nodes()
+                .iter()
+                .any(|n| n.path == deep && n.open)
+        );
+
+        // Backspace deletes what was typed; Esc clears it and the tree is back.
+        for c in "notes".chars() {
+            picker.handle_key(key(c));
+        }
+        settle(&mut picker);
+        assert_eq!(picker.selected_path(), Some(root.join("docs/notes.md")));
+        picker.handle_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+        assert_eq!(picker.tree_query, "note");
+        picker.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(picker.tree_query.is_empty());
+        assert!(picker.found.is_none());
         drop(picker);
         crate::testing::remove_tree(&root);
     }
@@ -4433,6 +5022,45 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
+    fn the_tree_says_why_a_network_folder_was_not_searched() {
+        use ratatui::backend::TestBackend;
+        let root =
+            crate::testing::temp_dir().join(format!("tadoru-treenet-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let mut picker = test_picker(root.clone(), Mode::Browse);
+        picker.tree_view = true;
+        picker.tree();
+        // A search already started on a share, which is refused before the
+        // server is contacted.
+        let mut source = Source::start(
+            Mode::Browse,
+            Path::new(r"\\unreachable.invalid\share"),
+            &Config::default(),
+            0,
+        );
+        source.finish_scan();
+        picker.tree_search = Some(source);
+        picker.tree_query = "notes".into();
+        picker.tick_tree_search();
+        let mut terminal = Terminal::new(TestBackend::new(160, 12)).unwrap();
+        terminal
+            .draw(|frame| picker.render(frame.area(), frame))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let screen: String = (0..12u16)
+            .flat_map(|y| (0..160u16).map(move |x| (x, y)))
+            .map(|(x, y)| buffer[(x, y)].symbol().to_string())
+            .collect();
+        assert!(
+            screen.contains("Not searched: Recursive scan blocked"),
+            "{screen}"
+        );
+        drop(picker);
+        crate::testing::remove_tree(&root);
+    }
+
+    #[test]
     fn escape_clears_active_filter_before_exit_and_ctrl_c_exits_immediately() {
         for mode in [Mode::Browse, Mode::Dirs] {
             let root = std::env::temp_dir().join("tadoru-escape-nonexistent-root");
@@ -4912,6 +5540,33 @@ mod tests {
                 )
             })
             .collect()
+    }
+
+    #[test]
+    fn matched_letters_are_shared_out_among_the_rows_of_a_path() {
+        let sep = std::path::MAIN_SEPARATOR;
+        let root = PathBuf::from("r");
+        let src = root.join("src");
+        let ui = src.join("ui");
+        let gauge = ui.join("gauge.rs");
+        let mut marks = HashMap::new();
+        // The s of src at 0, the u of ui at 4, and g and a at 7 and 8.
+        let display = format!("src{sep}ui{sep}gauge.rs");
+        spread_marks(&gauge, &display, &[0, 4, 7, 8], &mut marks);
+        assert_eq!(marks[&src], [0]);
+        assert_eq!(marks[&ui], [0]);
+        assert_eq!(marks[&gauge], [0, 1]);
+
+        // A worse match passing through a folder does not repaint it, and a
+        // folder with none of the letters gets no entry.
+        let x = ui.join("x");
+        spread_marks(&x, &format!("src{sep}ui{sep}x"), &[1, 7], &mut marks);
+        assert_eq!(marks[&src], [0]);
+        assert_eq!(marks[&x], [0]);
+        // A folder's own match wins over one passing through it.
+        spread_marks(&ui, &format!("src{sep}ui"), &[5], &mut marks);
+        assert_eq!(marks[&ui], [1]);
+        assert!(!marks.contains_key(&root));
     }
 
     #[test]

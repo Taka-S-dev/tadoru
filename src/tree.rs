@@ -2,7 +2,7 @@
 //! below it opened and closed in place, as in a file tree side panel. A
 //! folder's contents are read when it is opened, not before.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::browse::listing;
@@ -17,6 +17,9 @@ pub struct Node {
     pub open: bool,
     /// The lines drawn before the label, such as `│  ├─ `.
     pub guide: String,
+    /// Shown only because something below it matched a search, so drawn
+    /// dimmed.
+    pub dim: bool,
 }
 
 pub struct Tree {
@@ -115,6 +118,66 @@ impl Tree {
             self.selected = parent;
         }
         false
+    }
+
+    /// A tree of what a search under `root` matched, best first in `matches`:
+    /// each match under the folders it sits in, which are drawn dimmed unless
+    /// they match too. The best match starts out selected.
+    pub fn from_matches(root: PathBuf, matches: &[(PathBuf, bool)]) -> Self {
+        // Every match and the folders between it and the root, by folder.
+        let mut below: HashMap<PathBuf, Vec<(PathBuf, bool)>> = HashMap::new();
+        let mut listed: HashSet<PathBuf> = HashSet::new();
+        for (path, is_dir) in matches {
+            let Ok(relative) = path.strip_prefix(&root) else {
+                continue;
+            };
+            let mut parent = root.clone();
+            let mut steps = relative.components().peekable();
+            while let Some(step) = steps.next() {
+                let here = parent.join(step);
+                let dir = steps.peek().is_some() || *is_dir;
+                if listed.insert(here.clone()) {
+                    below
+                        .entry(parent.clone())
+                        .or_default()
+                        .push((here.clone(), dir));
+                }
+                parent = here;
+            }
+        }
+        let matched: HashSet<&Path> = matches.iter().map(|(path, _)| path.as_path()).collect();
+        let mut nodes = vec![root_node(&root)];
+        emit(&root, 1, &mut below, &matched, &mut nodes);
+        let selected = matches
+            .first()
+            .and_then(|(best, _)| nodes.iter().position(|node| &node.path == best))
+            .unwrap_or(0);
+        let mut tree = Self {
+            root,
+            nodes,
+            selected,
+            first: 0,
+        };
+        tree.relayout();
+        tree
+    }
+
+    /// Opens the folders between the root and `path`, and selects it.
+    pub fn reveal(&mut self, path: &Path) {
+        let Ok(relative) = path.strip_prefix(&self.root) else {
+            return;
+        };
+        let mut here = self.root.clone();
+        for step in relative.components() {
+            here = here.join(step);
+            let Some(index) = self.nodes.iter().position(|node| node.path == here) else {
+                return;
+            };
+            self.selected = index;
+            if here != path {
+                self.open(index);
+            }
+        }
     }
 
     /// Opens or closes the selected folder, for a double click.
@@ -252,6 +315,7 @@ fn root_node(root: &Path) -> Node {
         depth: 0,
         open: true,
         guide: String::new(),
+        dim: false,
     }
 }
 
@@ -265,8 +329,50 @@ fn children(dir: &Path, depth: usize) -> Vec<Node> {
             depth,
             open: false,
             guide: String::new(),
+            dim: false,
         })
         .collect()
+}
+
+/// Puts the rows under `dir` in tree order, each followed by what is under
+/// it, sorting each folder as browsing does.
+fn emit(
+    dir: &Path,
+    depth: usize,
+    below: &mut HashMap<PathBuf, Vec<(PathBuf, bool)>>,
+    matched: &HashSet<&Path>,
+    nodes: &mut Vec<Node>,
+) {
+    let Some(mut kids) = below.remove(dir) else {
+        return;
+    };
+    kids.sort_by_cached_key(|(path, is_dir)| (!*is_dir, label_of(path, false).to_lowercase()));
+    for (path, is_dir) in kids {
+        nodes.push(Node {
+            label: label_of(&path, is_dir),
+            open: below.contains_key(&path),
+            dim: !matched.contains(path.as_path()),
+            path: path.clone(),
+            is_dir,
+            depth,
+            guide: String::new(),
+        });
+        emit(&path, depth + 1, below, matched, nodes);
+    }
+}
+
+/// A row's name as browse shows it: a folder's ends in a separator. A drive
+/// has no file name, so its path is its name.
+fn label_of(path: &Path, is_dir: bool) -> String {
+    let name = path.file_name().map_or_else(
+        || path.display().to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    );
+    if is_dir && !name.ends_with(std::path::MAIN_SEPARATOR) {
+        format!("{name}{}", std::path::MAIN_SEPARATOR)
+    } else {
+        name
+    }
 }
 
 #[cfg(test)]
@@ -390,6 +496,55 @@ mod tests {
         );
         assert!(tree.nodes()[2].open, "deep was open and stays open");
         assert_eq!(tree.nodes()[2].depth, 2);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn matches_are_shown_under_their_folders_with_the_best_selected() {
+        let root = PathBuf::from("R");
+        let sep = std::path::MAIN_SEPARATOR;
+        // Best first: the file deep down, then a folder that also sits on
+        // the way to it, then a file at the top.
+        let matches = [
+            (root.join("src").join("ui").join("tree.rs"), false),
+            (root.join("src"), true),
+            (root.join("NOTES.md"), false),
+            (root.join("docs").join("tree.md"), false),
+        ];
+        let tree = Tree::from_matches(root.clone(), &matches);
+        let rows: Vec<(String, bool)> = tree
+            .nodes()
+            .iter()
+            .skip(1)
+            .map(|node| (format!("{}{}", node.guide, node.label), node.dim))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                (format!("├─ docs{sep}"), true),
+                ("│  └─ tree.md".into(), false),
+                (format!("├─ src{sep}"), false),
+                (format!("│  └─ ui{sep}"), true),
+                ("│     └─ tree.rs".into(), false),
+                ("└─ NOTES.md".into(), false),
+            ]
+        );
+        assert_eq!(tree.selected_node().path, matches[0].0, "the best match");
+        assert!(tree.nodes()[1].open && !tree.nodes()[2].open);
+    }
+
+    #[test]
+    fn reveal_opens_the_way_down_and_selects() {
+        let root = fixture("reveal");
+        let mut tree = Tree::new(root.clone(), None);
+        tree.reveal(&root.join("a/deep"));
+        assert_eq!(tree.selected_node().path, root.join("a/deep"));
+        assert!(
+            tree.nodes()
+                .iter()
+                .any(|n| n.path == root.join("a") && n.open)
+        );
+        assert!(!tree.selected_node().open, "the target itself stays closed");
         std::fs::remove_dir_all(root).unwrap();
     }
 

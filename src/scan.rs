@@ -204,9 +204,7 @@ fn check_scan_root(root: &Path) -> Result<(), String> {
     match std::fs::canonicalize(root) {
         Ok(resolved) => check_windows_volume(&resolved),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(format!(
-            "Cannot verify scan location: {error}. Use browse instead."
-        )),
+        Err(error) => Err(format!("Cannot verify scan location: {error}.")),
     }
 }
 
@@ -217,12 +215,9 @@ fn check_windows_volume(root: &Path) -> Result<(), String> {
     let drive = match absolute.components().next() {
         Some(Component::Prefix(prefix)) => match prefix.kind() {
             Prefix::Disk(drive) | Prefix::VerbatimDisk(drive) => drive,
-            _ => return Err(
-                "Recursive scan blocked on network or unsupported paths. Use browse (Tab) instead."
-                    .into(),
-            ),
+            _ => return Err("Recursive scan blocked on network or unsupported paths.".into()),
         },
-        _ => return Err("Cannot verify scan drive. Use browse (Tab) instead.".into()),
+        _ => return Err("Cannot verify scan drive.".into()),
     };
     let name = [drive as u16, b':' as u16, b'\\' as u16, 0];
     #[link(name = "kernel32")]
@@ -232,10 +227,7 @@ fn check_windows_volume(root: &Path) -> Result<(), String> {
     // SAFETY: name is a valid, NUL-terminated UTF-16 drive root for this call.
     match unsafe { GetDriveTypeW(name.as_ptr()) } {
         2 | 3 | 5 | 6 => Ok(()),
-        _ => Err(
-            "Recursive scan blocked on network or unverified drives. Use browse (Tab) instead."
-                .into(),
-        ),
+        _ => Err("Recursive scan blocked on network or unverified drives.".into()),
     }
 }
 
@@ -288,7 +280,9 @@ fn to_entry(root: &Arc<PathBuf>, entry: &DirEntry, mode: Mode) -> Option<Entry> 
     let wanted = match mode {
         Mode::Dirs => is_dir,
         Mode::Files => !is_dir,
-        Mode::Recent | Mode::Favorites | Mode::Browse => false,
+        // The tree's search, which shows folders and files alike.
+        Mode::Browse => true,
+        Mode::Recent | Mode::Favorites => false,
     };
     if !wanted {
         return None;
