@@ -114,7 +114,7 @@ impl KeyMenu {
                     (true, false) => "Go up a level",
                     (false, _) => "Search one level up",
                 },
-                "Left",
+                "Left ^H",
                 KeyCode::Left,
                 none,
             ),

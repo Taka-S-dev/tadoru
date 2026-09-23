@@ -42,10 +42,10 @@ const NOTICE_LINGER: Duration = Duration::from_secs(3);
 /// that spot. Roughly a double-click interval is enough to catch those without
 /// the screen feeling unresponsive.
 const CLICK_GUARD: Duration = Duration::from_millis(300);
-/// How long Backspace has to rest before a press counts as a new one. It only
-/// matters where letting go of a key is not reported, which is everywhere but
-/// Windows. A held key whose repeat starts later than this is taken for a new
-/// press, and goes up once the filter is empty.
+/// How long after Backspace deleted something a press on the empty filter
+/// is still taken as clearing rather than as going up. Time alone decides:
+/// letting go of the key does not end it, since a finger that lifts for a
+/// moment and presses again is exactly the press too many this is for.
 const ERASE_PAUSE: Duration = Duration::from_millis(1500);
 /// The preview pane is dropped below this terminal width.
 const MIN_WIDTH_FOR_PREVIEW: u16 = 80;
@@ -298,11 +298,6 @@ struct Picker {
     notice_until: Option<std::time::Instant>,
     /// Until when a click is treated as left over from the previous screen.
     clicks_blocked_until: Option<std::time::Instant>,
-    /// Whether the Backspace being held, or pressed in quick succession, has
-    /// deleted something. It stops at an empty filter instead of going up.
-    erase_deleted: bool,
-    /// When Backspace last arrived, for terminals that report no releases.
-    erase_at: Option<std::time::Instant>,
     notice: Option<String>,
     pinned: crate::favorites::Index,
     menu: Option<crate::action_menu::Menu>,
@@ -332,6 +327,9 @@ struct Picker {
     after_action: crate::actions::Then,
     /// The folder handed to the shell when an action ended the run with cd.
     after_cd: Option<PathBuf>,
+    /// When Backspace last deleted a letter, or was swallowed on the empty
+    /// filter soon after. While that is recent, Backspace does not go up.
+    last_erase: Option<std::time::Instant>,
 }
 
 /// A place the search has started from, with what had been typed there.
@@ -393,8 +391,6 @@ pub fn run(args: PickArgs, root: PathBuf, config: Config) -> Result<Option<PathB
         frame_count: 0,
         notice_until: None,
         clicks_blocked_until: None,
-        erase_deleted: false,
-        erase_at: None,
         notice,
         pinned,
         menu: None,
@@ -422,6 +418,7 @@ pub fn run(args: PickArgs, root: PathBuf, config: Config) -> Result<Option<PathB
         last_click: None,
         after_action: crate::actions::Then::Stay,
         after_cd: None,
+        last_erase: None,
     };
     picker.after_action = args.after_action;
     if let Some(reason) = refused {
@@ -489,12 +486,6 @@ fn mode_index(mode: Mode) -> usize {
         .iter()
         .position(|&m| m == mode)
         .expect("known mode")
-}
-
-/// Backspace, or Ctrl-H standing in for it.
-fn is_erase(key: &KeyEvent) -> bool {
-    key.code == KeyCode::Backspace
-        || (key.code == KeyCode::Char('h') && key.modifiers.contains(KeyModifiers::CONTROL))
 }
 
 /// The search a picker opened in `mode` goes back to from browse. Opened
@@ -987,31 +978,31 @@ impl Picker {
                 (
                     KeyCode::Up | KeyCode::Down | KeyCode::PageUp | KeyCode::PageDown,
                     _
-                ) | (KeyCode::Char('j' | 'k'), true)
+                ) | (KeyCode::Char('j' | 'k' | 'h'), true)
                     | (KeyCode::Left, _)
             )
         {
             self.found_keep = true;
         }
-        if is_erase(&key) {
-            // Backspace deletes what was typed, and with nothing left goes
-            // up as it does in the columns.
-            let has_text = !self.tree_query.is_empty();
-            if self.erase(has_text) {
-                self.tree_left();
-            } else if has_text {
+        if key.code == KeyCode::Backspace {
+            // Backspace deletes, and on an empty filter goes up as Left
+            // does, unless it has just been clearing: see backspace_goes_up.
+            if !self.tree_query.is_empty() {
                 let mut query = self.tree_query.clone();
                 query.pop();
                 self.set_tree_query(&query);
+                self.note_erase();
+            } else if self.backspace_goes_up() {
+                self.tree_left();
             }
             return Action::Continue;
         }
         match (key.code, ctrl) {
             // In a search Left walks up the matches' folders; the root stays.
-            (KeyCode::Left, _) if searching => {
+            (KeyCode::Left, _) | (KeyCode::Char('h'), true) if searching => {
                 self.shown_tree().left();
             }
-            (KeyCode::Left, _) => self.tree_left(),
+            (KeyCode::Left, _) | (KeyCode::Char('h'), true) => self.tree_left(),
             // Right on a match goes back to the tree of folders, opened down
             // to it: a search finds the place, and the tree goes on from there.
             (KeyCode::Right, _) | (KeyCode::Char('l'), true) if searching => {
@@ -1288,9 +1279,6 @@ impl Picker {
                 _ => continue,
             };
             if key.kind == KeyEventKind::Release {
-                if is_erase(&key) {
-                    self.end_erase();
-                }
                 continue;
             }
             match self.handle_key(key) {
@@ -1655,34 +1643,6 @@ impl Picker {
         }
     }
 
-    /// One press of Backspace or Ctrl-H, given whether there is anything left
-    /// to delete. Says whether it should go up instead.
-    ///
-    /// Holding the key to clear what was typed must stop once it is clear:
-    /// a run of presses that began by deleting does not carry on upwards. A
-    /// run ends when the key is let go, when another key comes, or, where
-    /// the terminal reports no releases, after a pause.
-    fn erase(&mut self, has_text: bool) -> bool {
-        let now = std::time::Instant::now();
-        if self
-            .erase_at
-            .is_some_and(|at| now.duration_since(at) > ERASE_PAUSE)
-        {
-            self.erase_deleted = false;
-        }
-        self.erase_at = Some(now);
-        if has_text {
-            self.erase_deleted = true;
-            return false;
-        }
-        !self.erase_deleted
-    }
-
-    fn end_erase(&mut self) {
-        self.erase_deleted = false;
-        self.erase_at = None;
-    }
-
     /// Starts ignoring clicks, because what is under the pointer has just been
     /// replaced and the next one is most likely a leftover from the old screen.
     fn block_clicks(&mut self) {
@@ -1692,6 +1652,29 @@ impl Picker {
 
     /// Whether a button press should be discarded as belonging to the screen
     /// that was on show a moment ago.
+    /// Backspace deleted a letter: for a while, a press on the empty filter
+    /// clears rather than climbs.
+    fn note_erase(&mut self) {
+        self.last_erase = Some(std::time::Instant::now());
+    }
+
+    /// Whether Backspace on an empty filter goes up. It does, unless Backspace
+    /// deleted something within ERASE_PAUSE: then it is a press too many
+    /// while clearing, and moving would take the reader somewhere they never
+    /// meant to go. A swallowed press keeps the pause going, so holding the
+    /// key past the empty filter stays put for as long as it is held.
+    fn backspace_goes_up(&mut self) -> bool {
+        let now = std::time::Instant::now();
+        if self
+            .last_erase
+            .is_some_and(|at| now.duration_since(at) <= ERASE_PAUSE)
+        {
+            self.last_erase = Some(now);
+            return false;
+        }
+        true
+    }
+
     /// The list whose button on the top border is at that cell, if any.
     fn place_button_at(&self, column: u16, row: u16) -> Option<Mode> {
         if !self.mouse_header.contains((column, row).into()) {
@@ -1852,6 +1835,11 @@ impl Picker {
 
     fn handle_key(&mut self, key: KeyEvent) -> Action {
         self.last_click = None;
+        // A filter cleared with Esc was meant to be cleared, so Backspace
+        // right after it goes up without the pause.
+        if key.code == KeyCode::Esc {
+            self.last_erase = None;
+        }
         if self.naming.is_some() {
             self.handle_naming_key(key);
             return Action::Continue;
@@ -1901,9 +1889,6 @@ impl Picker {
             };
         }
         self.clear_notice();
-        if !is_erase(&key) {
-            self.end_erase();
-        }
         if self.places.is_some() {
             return self.handle_places_key(key);
         }
@@ -2038,16 +2023,17 @@ impl Picker {
                 s.selected = s.selected.saturating_add(1);
                 Action::Continue
             }
-            // Ctrl-H is Backspace: it is what some terminals send for the
-            // Backspace key itself. With nothing left to delete it widens the
-            // search as Left does, as browse climbs.
-            (KeyCode::Backspace, _) | (KeyCode::Char('h'), true) => {
-                if self.erase(!self.query.is_empty()) {
-                    self.navigate(Nav::Up);
-                } else if !self.query.is_empty() {
+            // Backspace deletes, and on an empty filter widens the search
+            // as Left does, unless it has just been clearing: see
+            // backspace_goes_up.
+            (KeyCode::Backspace, _) => {
+                if !self.query.is_empty() {
                     let mut q = self.query.clone();
                     q.pop();
                     self.set_query(&q);
+                    self.note_erase();
+                } else if self.backspace_goes_up() {
+                    self.navigate(Nav::Up);
                 }
                 Action::Continue
             }
@@ -2071,7 +2057,9 @@ impl Picker {
             }
             // The same key that climbs a level in browse. Here the level is
             // the root the scan started from, so the search widens by one.
-            (KeyCode::Left, _) => {
+            // Ctrl-H is Left, as Ctrl-J, Ctrl-K and Ctrl-L are the other
+            // arrows, on every screen.
+            (KeyCode::Left, _) | (KeyCode::Char('h'), true) => {
                 self.navigate(Nav::Up);
                 Action::Continue
             }
@@ -2104,23 +2092,23 @@ impl Picker {
             return self.handle_tree_key(key);
         }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-        // Backspace on an empty filter climbs, as in yazi, and Ctrl-H is
-        // Backspace here as in the search.
-        if is_erase(&key) {
-            let has_text = !self.browser().filter.is_empty();
-            if self.erase(has_text) {
-                self.browser().up();
-            } else if has_text {
-                let b = self.browser();
+        // Backspace deletes, and on an empty filter goes up as in yazi,
+        // unless it has just been clearing: see backspace_goes_up.
+        if key.code == KeyCode::Backspace {
+            let b = self.browser();
+            if !b.filter.is_empty() {
                 let mut f = b.filter.clone();
                 f.pop();
                 b.set_filter(&f);
+                self.note_erase();
+            } else if self.backspace_goes_up() {
+                self.browser().up();
             }
             return Action::Continue;
         }
         let b = self.browser();
         match (key.code, ctrl) {
-            (KeyCode::Left, _) => b.up(),
+            (KeyCode::Left, _) | (KeyCode::Char('h'), true) => b.up(),
             (KeyCode::Right, _) | (KeyCode::Char('l'), true) => b.enter(),
             (KeyCode::Up, _) | (KeyCode::Char('k'), true) => b.move_selection(-1),
             (KeyCode::Down, _) | (KeyCode::Char('j'), true) => b.move_selection(1),
@@ -3888,8 +3876,6 @@ mod tests {
             frame_count: 0,
             notice_until: None,
             clicks_blocked_until: None,
-            erase_deleted: false,
-            erase_at: None,
             notice: None,
             pinned: crate::favorites::Index::default(),
             menu: None,
@@ -3922,6 +3908,7 @@ mod tests {
             last_click: None,
             after_action: crate::actions::Then::Stay,
             after_cd: None,
+            last_erase: None,
         }
     }
 
@@ -5743,63 +5730,67 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_h_is_backspace_in_the_search_and_in_browse() {
+    fn backspace_goes_up_only_once_it_has_not_been_clearing_for_a_while() {
         let root = crate::testing::temp_dir().join(format!("tadoru-ctrl-h-{}", std::process::id()));
         let inner = root.join("only/inner");
         std::fs::create_dir_all(&inner).unwrap();
         let ctrl_h = KeyEvent::new(KeyCode::Char('h'), KeyModifiers::CONTROL);
+        let backspace = KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE);
+        let esc = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+        let long_ago = Some(std::time::Instant::now() - ERASE_PAUSE - Duration::from_millis(1));
 
-        // In the search it deletes a letter. Held down, it stops once the
-        // filter is empty rather than going on to widen the search.
-        let mut picker = test_picker(inner.clone(), Mode::Dirs);
-        picker.set_query("ab");
-        picker.handle_key(ctrl_h);
-        assert_eq!(picker.query, "a");
-        assert_eq!(picker.root, inner);
-        picker.handle_key(ctrl_h);
-        picker.handle_key(ctrl_h);
-        assert_eq!(picker.query, "");
-        assert_eq!(picker.root, inner, "the held key stops at an empty filter");
-        // Let go and pressed again, it widens the search as Left does.
-        picker.end_erase();
-        picker.handle_key(ctrl_h);
-        assert_eq!(picker.root, root.join("only"));
-        drop(picker);
-
-        // With nothing typed to begin with, the first press widens: straight
-        // after starting, Ctrl-H goes up as it does in browse.
-        let mut picker = test_picker(inner.clone(), Mode::Dirs);
-        picker.handle_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
-        assert_eq!(picker.root, root.join("only"));
-        drop(picker);
-
-        // In browse it deletes a letter of the filter, and climbs once the
-        // filter is empty and the key has been let go. Quick presses on an
-        // empty filter climb one level each.
+        // In browse: deleting, then a press too many, stays put; after the
+        // pause the same press goes up, and so does the next one at once.
         let mut picker = test_picker(inner.clone(), Mode::Browse);
         picker.browser().set_filter("x");
-        picker.handle_key(ctrl_h);
+        picker.handle_key(backspace);
         assert_eq!(picker.browser().filter, "");
-        picker.handle_key(ctrl_h);
+        picker.handle_key(backspace);
+        picker.handle_key(backspace);
         assert_eq!(
             picker.browser().cwd,
             inner,
-            "the held key stops at an empty filter"
+            "a press too many must not move"
         );
-        picker.end_erase();
-        picker.handle_key(ctrl_h);
+        picker.last_erase = long_ago;
+        picker.handle_key(backspace);
         assert_eq!(picker.browser().cwd, root.join("only"));
-        picker.handle_key(ctrl_h);
-        assert_eq!(picker.browser().cwd, root);
+        picker.handle_key(backspace);
+        assert_eq!(
+            picker.browser().cwd,
+            root,
+            "going up has no pause of its own"
+        );
         drop(picker);
 
-        // Another key in between ends the run as letting go does.
+        // Esc clears without the pause: Backspace right after it goes up.
         let mut picker = test_picker(inner.clone(), Mode::Browse);
         picker.browser().set_filter("x");
-        picker.handle_key(ctrl_h);
-        picker.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        picker.handle_key(backspace);
+        picker.handle_key(esc);
+        picker.handle_key(backspace);
+        assert_eq!(picker.browser().cwd, root.join("only"));
+        drop(picker);
+
+        // Ctrl-H is Left and never waits: it goes up even mid-clearing.
+        let mut picker = test_picker(inner.clone(), Mode::Browse);
+        picker.browser().set_filter("x");
+        picker.handle_key(backspace);
         picker.handle_key(ctrl_h);
         assert_eq!(picker.browser().cwd, root.join("only"));
+        drop(picker);
+
+        // In the search the same, widening by a level and keeping nothing.
+        let mut picker = test_picker(inner.clone(), Mode::Dirs);
+        picker.set_query("ab");
+        picker.handle_key(backspace);
+        picker.handle_key(backspace);
+        picker.handle_key(backspace);
+        assert_eq!(picker.query, "");
+        assert_eq!(picker.root, inner, "a press too many must not widen");
+        picker.last_erase = long_ago;
+        picker.handle_key(backspace);
+        assert_eq!(picker.root, root.join("only"));
         drop(picker);
         crate::testing::remove_tree(&root);
     }

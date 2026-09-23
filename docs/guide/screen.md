@@ -170,13 +170,13 @@ Only Ctrl-Space itself has to get through the terminal. If the terminal keeps on
 for itself, the letter in the panel still works. Where Ctrl-Space is taken, by an input method for
 example, the shortcuts and the mouse are what is left.
 
-Ctrl-J and Ctrl-K move the selection down and up, and Ctrl-H deletes a letter as Backspace does, in
-every list and in the action menu's filter. Some terminals send Ctrl-H for the Backspace key itself,
-and there it still deletes. With nothing left to delete, Backspace and Ctrl-H go up: a level in
-browse, and in a search one level wider, as Left does. Held down to clear what was typed, they stop
-at the empty filter; let go and press again to go up. tadoru hears a key being let go only on
-Windows, so elsewhere press again after a pause of about a second and a half, or after any other
-key. Ctrl-L does what Right does.
+Ctrl-J, Ctrl-K, Ctrl-H and Ctrl-L are the arrows, as in Vim: down, up, left and right, on every
+screen. So Ctrl-H goes up a level in browse and the tree, and widens a search by a level. Backspace
+deletes a letter of the filter, and with nothing left to delete it goes up as Left does, as in yazi,
+except in the second and a half after it deleted something: held down to clear a filter, or pressed
+once too often, it stops at the empty filter instead of moving. Esc clears the filter without that
+pause. In the action menu's filter, Ctrl-H deletes as Backspace does, since the menu has no left to
+go.
 
 ## Modes and favorites
 
@@ -283,12 +283,12 @@ right. tadoru is a tool for cd, so it does not copy, delete or rename. Only the 
 background and a pointer, so it is always clear which column the cursor is in. The left and right
 columns mark the current folder in an accent colour.
 
-On Windows there is no folder above the top of a drive, so going up from one, with Left, Backspace
-or ▲, lists the drives, with the one just left selected. Enter goes to that drive and Right goes
-into it, so the top of a drive can be chosen like any other folder, and another drive can be picked
-from the same list. At the top of a drive the left column lists the drives too. A search started
-from the list begins at the drive selected. The list shows the drive letters Windows has assigned,
-mapped network drives included, and is made without opening any of them.
+On Windows there is no folder above the top of a drive, so going up from one, with Left, Ctrl-H,
+Backspace or ▲, lists the drives, with the one just left selected. Enter goes to that drive and
+Right goes into it, so the top of a drive can be chosen like any other folder, and another drive can
+be picked from the same list. At the top of a drive the left column lists the drives too. A search
+started from the list begins at the drive selected. The list shows the drive letters Windows has
+assigned, mapped network drives included, and is made without opening any of them.
 
 **Ctrl+← goes back and Ctrl+→ goes forward.** Alt+← and Alt+→ do the same, but if the terminal uses
 Alt with the arrows for something else, such as moving between panes, those keys never reach tadoru,
