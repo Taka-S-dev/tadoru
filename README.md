@@ -90,7 +90,8 @@ Tab goes between the search and browse. Browse goes back to the search used last
 `cf` Tab goes between files and browse. Shift-Tab goes between dirs and files, and in browse
 between the columns and a tree. The mode names on the top border also switch with a click.
 Favorites and recent places are not screens but lists that open over whichever screen you are on:
-Ctrl-S and Ctrl-R open them, Enter cds to the place, Right takes the screen there, and Esc closes.
+Ctrl-S and Ctrl-R open them, as do the `favorites` and `recent` buttons after the tabs; Enter cds
+to the place, Right takes the screen there, and Esc closes.
 In every mode, typing filters the list and Enter cds there. The letters match in order with gaps;
 `'word` asks for them side by side, as in fzf ([what typing matches](docs/guide/screen.md#what-typing-matches)).
 Esc clears the filter, and pressed again on an empty filter it quits. Ctrl-C always quits.
@@ -101,7 +102,7 @@ Esc clears the filter, and pressed again on an empty filter it quits. Ctrl-C alw
 | Tab | Go between the search and browse, back to the search used last |
 | Shift-Tab | Go between dirs and files. In browse, switch between the columns and a tree whose folders open in place and where typing searches everything below |
 | Ctrl-D / Ctrl-F | Go straight to dirs or files |
-| Ctrl-S / Ctrl-R | Open the favorites (S for starred) or the recent places over the screen. Typing filters them; Enter cds there, Right takes the screen there and keeps going, Esc closes |
+| Ctrl-S / Ctrl-R | Open the favorites (S for starred) or the recent places over the screen, as does a click on `favorites` or `recent` after the tabs. Typing filters them; Enter cds there, Right or a double click takes the screen there and keeps going, Esc closes |
 | Ctrl-B | Pin or unpin the selected folder as a favorite |
 | Ctrl-N | Name the selected folder's favorite, for `c @name`; an empty name takes the name away |
 | Ctrl-P | Open the action menu for the selected item |

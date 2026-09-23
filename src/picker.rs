@@ -1358,6 +1358,12 @@ impl Picker {
         // With a list of places open, a click on a row selects it, the wheel
         // moves through it, and a click anywhere else closes it.
         if let Some(mode) = self.places {
+            if mouse.kind == MouseEventKind::Down(MouseButton::Left)
+                && let Some(wanted) = self.place_button_at(mouse.column, mouse.row)
+            {
+                self.open_places(wanted);
+                return;
+            }
             let (rows, first, count) = self.mouse_places;
             let next = match mouse.kind {
                 MouseEventKind::Down(MouseButton::Left) if rows.contains(position) => {
@@ -1365,7 +1371,32 @@ impl Picker {
                     if row >= count {
                         return;
                     }
-                    row
+                    self.source_for(mode).selected = row as u32;
+                    // A double click goes to the place, as Right does and as
+                    // a double click goes into a folder in browse. Enter,
+                    // which would quit, stays on the keyboard as it does in
+                    // every list.
+                    if let Some(path) = self.selected_path() {
+                        let now = std::time::Instant::now();
+                        let double =
+                            self.last_click
+                                .take()
+                                .is_some_and(|(previous, x, y, time)| {
+                                    previous == path
+                                        && x == mouse.column
+                                        && y == mouse.row
+                                        && now.duration_since(time) <= Duration::from_millis(500)
+                                });
+                        if double {
+                            self.handle_places_key(KeyEvent::new(
+                                KeyCode::Right,
+                                KeyModifiers::NONE,
+                            ));
+                        } else {
+                            self.last_click = Some((path, mouse.column, mouse.row, now));
+                        }
+                    }
+                    return;
                 }
                 MouseEventKind::Down(_) => {
                     self.places = None;
@@ -1455,6 +1486,10 @@ impl Picker {
                     self.select_tab(tab);
                     return;
                 }
+            }
+            if let Some(mode) = self.place_button_at(mouse.column, mouse.row) {
+                self.open_places(mode);
+                return;
             }
         }
         let (area, first, count) = self.mouse_rows;
@@ -1608,6 +1643,18 @@ impl Picker {
 
     /// Whether a button press should be discarded as belonging to the screen
     /// that was on show a moment ago.
+    /// The list whose button on the top border is at that cell, if any.
+    fn place_button_at(&self, column: u16, row: u16) -> Option<Mode> {
+        if !self.mouse_header.contains((column, row).into()) {
+            return None;
+        }
+        let first = self.mouse_modes_x;
+        place_buttons(self.mouse_header.width)
+            .into_iter()
+            .find(|&(_, start, end)| column >= first + start && column < first + end)
+            .map(|(mode, ..)| mode)
+    }
+
     fn clicks_blocked(&mut self) -> bool {
         match self.clicks_blocked_until {
             Some(until) if std::time::Instant::now() < until => true,
@@ -2150,7 +2197,11 @@ impl Picker {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(theme::BORDER)
-            .title(Line::from(mode_tabs((mode, false))))
+            .title(Line::from(mode_tabs(
+                (mode, false),
+                self.places,
+                list_area.width,
+            )))
             // Shift-Tab is named by where it leads, as Tab is in browse.
             .title_bottom(footer_line(
                 self.notice.as_deref(),
@@ -2379,7 +2430,11 @@ impl Picker {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(theme::BORDER)
-            .title(Line::from(mode_tabs((Mode::Browse, true))))
+            .title(Line::from(mode_tabs(
+                (Mode::Browse, true),
+                self.places,
+                list_area.width,
+            )))
             .title_bottom(footer_line(
                 self.notice.as_deref(),
                 &fit_hints(
@@ -2539,7 +2594,11 @@ impl Picker {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(theme::BORDER)
-            .title(Line::from(mode_tabs((Mode::Browse, false))))
+            .title(Line::from(mode_tabs(
+                (Mode::Browse, false),
+                self.places,
+                area.width,
+            )))
             // Tab goes back to whichever search was used last, so the hint
             // names it rather than leaving the reader to remember.
             .title_bottom(footer_line(
@@ -3333,10 +3392,45 @@ fn tab_offsets() -> Vec<(Tab, u16, u16)> {
     offsets
 }
 
+/// The lists that open over the screen, as buttons after the tabs, each
+/// with its icon: the star the rows mark favorites with, and a clock for the
+/// recent places. They sit outside the brackets so they read
+/// as lists rather than as more tabs. Ctrl-S and Ctrl-R do the same from the
+/// keyboard. The icons are plain Unicode, so they show without a Nerd Font.
+const PLACE_BUTTONS: [(Mode, &str, &str); 2] = [
+    (Mode::Favorites, "★ ", "favorites"),
+    (Mode::Recent, "◷ ", "recent"),
+];
+
+/// Where each button starts and ends, counted in columns from the first tab
+/// label, leaving out any that would run into the border's corner at `width`.
+/// Drawing and clicking both go by it. The buttons are the last thing on the
+/// border, so a narrow screen loses them and keeps the tabs.
+fn place_buttons(width: u16) -> Vec<(Mode, u16, u16)> {
+    // After the closing bracket and a gap the width of the one between tabs.
+    let mut x = tab_offsets().last().map_or(0, |&(_, _, end)| end) + 3;
+    let mut buttons = Vec::new();
+    for (i, (mode, icon, label)) in PLACE_BUTTONS.into_iter().enumerate() {
+        if i > 0 {
+            x += 2;
+        }
+        let end = x + (icon.width() + label.width()) as u16;
+        // The first label sits at column 2 of the box, and the corner takes
+        // the last column.
+        if end + 3 > width {
+            break;
+        }
+        buttons.push((mode, x, end));
+        x = end;
+    }
+    buttons
+}
+
 /// The tabs, `[dirs|files]  [browse|tree]`, drawn on the top border with the
-/// one shown underlined. Recent and favorites are not screens but lists that
-/// open over one, so they have no tab.
-fn mode_tabs(shown: Tab) -> Vec<Span<'static>> {
+/// one shown underlined, then the buttons for the lists of places with the
+/// open one underlined. Recent and favorites are not screens but lists that
+/// open over one, so they are buttons rather than tabs.
+fn mode_tabs(shown: Tab, open: Option<Mode>, width: u16) -> Vec<Span<'static>> {
     let mut header: Vec<Span> = vec![Span::styled("[", theme::HEADER)];
     for (i, tab) in tabs().into_iter().enumerate() {
         if i > 0 {
@@ -3349,7 +3443,22 @@ fn mode_tabs(shown: Tab) -> Vec<Span<'static>> {
         };
         header.push(Span::styled(tab_label(tab), style));
     }
-    header.push(Span::styled("] ", theme::HEADER));
+    header.push(Span::styled("]", theme::HEADER));
+    for (mode, ..) in place_buttons(width) {
+        header.push(Span::styled("  ", theme::HEADER));
+        let (_, icon, label) = PLACE_BUTTONS
+            .into_iter()
+            .find(|&(m, ..)| m == mode)
+            .expect("a drawn button is one of the two");
+        let style = if open == Some(mode) {
+            theme::HEADER.add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+        } else {
+            theme::HEADER
+        };
+        header.push(Span::styled(icon, theme::HEADER));
+        header.push(Span::styled(label, style));
+    }
+    header.push(Span::styled(" ", theme::HEADER));
     header
 }
 
@@ -4623,6 +4732,47 @@ mod tests {
     }
 
     #[test]
+    fn a_double_click_on_a_place_goes_there_as_right_does() {
+        let root =
+            crate::testing::temp_dir().join(format!("tadoru-dblclick-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("notes")).unwrap();
+        let config = root.join("config");
+        std::fs::create_dir_all(&config).unwrap();
+        let _config = crate::testing::config_dir(&config);
+        let file = crate::favorites::path().unwrap();
+        crate::favorites::pin(&file, &root.join("notes"), Some(true), Some("notes")).unwrap();
+        let mut picker = test_picker(root.clone(), Mode::Dirs);
+        picker.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+        let source = picker.source_for(Mode::Favorites);
+        source.finish_scan();
+        while source.matcher.tick(TICK_MS).running {}
+        source.clamp_selection();
+        // Where the rows were last drawn.
+        picker.mouse_places = (Rect::new(10, 10, 50, 4), 0, 1);
+        let click = |picker: &mut Picker| {
+            picker.handle_mouse(MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: 12,
+                row: 10,
+                modifiers: KeyModifiers::NONE,
+            });
+        };
+
+        // One click selects and keeps the list open; the second, on the
+        // same row, takes the search to the place and closes it.
+        click(&mut picker);
+        assert_eq!(picker.places, Some(Mode::Favorites));
+        assert_eq!(picker.selected_path(), Some(root.join("notes")));
+        click(&mut picker);
+        assert_eq!(picker.places, None);
+        assert_eq!(picker.mode, Mode::Dirs);
+        assert_eq!(picker.root, root.join("notes"));
+        drop(_config);
+        drop(picker);
+        crate::testing::remove_tree(&root);
+    }
+
+    #[test]
     fn the_favorites_list_opens_over_the_screen_and_enter_or_right_take_a_place() {
         let root = crate::testing::temp_dir().join(format!("tadoru-places-{}", std::process::id()));
         std::fs::create_dir_all(root.join("work/inner")).unwrap();
@@ -5109,6 +5259,66 @@ mod tests {
         });
         assert_eq!(picker.mode, Mode::Dirs);
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn the_lists_of_places_open_from_buttons_after_the_tabs() {
+        use ratatui::backend::TestBackend;
+        let root =
+            crate::testing::temp_dir().join(format!("tadoru-buttons-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("config")).unwrap();
+        let _config = crate::testing::config_dir(&root.join("config"));
+        let top_row = |picker: &mut Picker, width: u16| {
+            let mut terminal = Terminal::new(TestBackend::new(width, 12)).unwrap();
+            terminal
+                .draw(|frame| picker.render(frame.area(), frame))
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            (0..width)
+                .map(|x| buffer[(x, 0)].symbol().to_string())
+                .collect::<Vec<_>>()
+        };
+        let find = |cells: &[String], text: &str| -> Option<u16> {
+            let len = text.chars().count();
+            (0..=cells.len() - len)
+                .find(|&x| cells[x..x + len].concat() == text)
+                .map(|x| x as u16)
+        };
+        let click = |picker: &mut Picker, column: u16| {
+            picker.handle_mouse(MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column,
+                row: 0,
+                modifiers: KeyModifiers::NONE,
+            });
+        };
+
+        // Outside the brackets, each with its icon.
+        let mut picker = test_picker(root.clone(), Mode::Dirs);
+        let row = top_row(&mut picker, 100);
+        let favorites = find(&row, "[browse|tree]  ★ favorites  ◷ recent ").unwrap() + 15;
+        let recent = find(&row, "◷ recent").unwrap();
+
+        // A click opens the list, the other button swaps, and the same
+        // button closes it, as the keys do. The screen under it stays.
+        click(&mut picker, favorites);
+        assert_eq!(picker.places, Some(Mode::Favorites));
+        assert_eq!(picker.mode, Mode::Dirs);
+        click(&mut picker, recent + 5);
+        assert_eq!(picker.places, Some(Mode::Recent));
+        click(&mut picker, recent);
+        assert_eq!(picker.places, None);
+
+        // A screen too narrow for the buttons keeps the tabs and drops them,
+        // and a click where they would have been does nothing.
+        let mut picker = test_picker(root.clone(), Mode::Browse);
+        let row = top_row(&mut picker, 40);
+        assert!(find(&row, "[dirs|files]  [browse|tree]").is_some());
+        assert!(find(&row, "favorites").is_none(), "{}", row.concat());
+        click(&mut picker, 33);
+        assert_eq!(picker.places, None);
+        drop(_config);
+        crate::testing::remove_tree(&root);
     }
 
     #[test]

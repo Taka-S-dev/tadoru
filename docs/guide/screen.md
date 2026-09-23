@@ -207,16 +207,24 @@ selected. Tab from there goes back to the search, which then starts from that fo
 **Favorites and recent places** are lists of places to go rather than somewhere to be, so they are
 not screens with a tab. **Ctrl-S** (S for the starred ones) opens the favorites and **Ctrl-R** the
 recent places, as a list at the bottom right over whichever screen you are on, the way the action
-menu opens; the same key, Esc or a click outside closes it. Typing filters the list, and Esc clears
-what was typed before it closes. **Enter** cds to the place and quits, as it does everywhere.
-**Right** takes the screen under the list to the place and closes the list: looking for something in
-dirs, open favorites, pick one and press Right, and the dirs search carries on from that favorite,
-with the filter cleared since what was typed picked the place out and would match nothing inside it;
-Ctrl+← brings back both it and where the search started. Over browse, or the tree, the place is
-shown in its folder and selected, the way Tab shows a search result, so Enter then goes to the
-favorite itself rather than to whatever sorts first inside it, and Right again goes into it. A
-favorite whose folder has been deleted stays in the list so it can be unpinned, and the bottom of
-the screen says it is not there.
+menu opens; the same key, Esc or a click outside closes it.
+
+The two also open from the mouse: `★ favorites` and `◷ recent` sit on the top border after the tabs,
+outside the brackets so they read as lists rather than as more tabs, each with its icon. A click
+opens the list, a click on the other button swaps it, and a click on the same one closes it. A
+screen too narrow for them keeps the tabs and drops the buttons, since the keys still work. In the
+list, a click selects a place and a double click goes to it, as Right does; Enter, which quits,
+stays on the keyboard as it does in every list. Typing filters the list, and Esc clears what was
+typed before it closes.
+
+**Enter** cds to the place and quits, as it does everywhere. **Right** takes the screen under the
+list to the place and closes the list: looking for something in dirs, open favorites, pick one and
+press Right, and the dirs search carries on from that favorite, with the filter cleared since what
+was typed picked the place out and would match nothing inside it; Ctrl+← brings back both it and
+where the search started. Over browse, or the tree, the place is shown in its folder and selected,
+the way Tab shows a search result, so Enter then goes to the favorite itself rather than to whatever
+sorts first inside it, and Right again goes into it. A favorite whose folder has been deleted stays
+in the list so it can be unpinned, and the bottom of the screen says it is not there.
 
 The keys that act on the selection work in the list too: Ctrl-P opens the action menu for the place,
 Ctrl-O and Ctrl-E open it, and in favorites Ctrl-B unpins and Ctrl-N names. A picker opened straight
