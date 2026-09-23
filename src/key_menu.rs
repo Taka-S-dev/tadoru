@@ -122,6 +122,7 @@ impl KeyMenu {
                 ctrl,
             ),
             press('p', "Pin or unpin", "^B", KeyCode::Char('b'), ctrl),
+            press('n', "Name the favorite", "^N", KeyCode::Char('n'), ctrl),
             press('o', "Open", "^O", KeyCode::Char('o'), ctrl),
             press('e', "Show in file manager", "^E", KeyCode::Char('e'), ctrl),
             press('5', "Refresh", "F5", KeyCode::F(5), none),

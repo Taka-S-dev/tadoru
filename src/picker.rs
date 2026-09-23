@@ -306,6 +306,9 @@ struct Picker {
     notice: Option<String>,
     pinned: crate::favorites::Index,
     menu: Option<crate::action_menu::Menu>,
+    /// The folder whose favorite is being named, and the name typed so far,
+    /// while the name prompt is open.
+    naming: Option<(PathBuf, String)>,
     /// The panel of keys that Ctrl-Space opens.
     keys: Option<crate::key_menu::KeyMenu>,
     /// The last mode that shows a place: dirs, files or browse. Recent and
@@ -386,6 +389,7 @@ pub fn run(args: PickArgs, root: PathBuf, config: Config) -> Result<Option<PathB
         notice,
         pinned,
         menu: None,
+        naming: None,
         keys: None,
         tree_view: false,
         tree: None,
@@ -1387,6 +1391,64 @@ impl Picker {
         }
     }
 
+    /// The folder Ctrl-B pins and Ctrl-N names: the selected folder, or the
+    /// folder holding the selected file. None on the list of drives.
+    fn pin_target(&mut self) -> Option<PathBuf> {
+        if self.in_tree() {
+            Some(self.shown_tree().target()).filter(|path| !path.as_os_str().is_empty())
+        } else if self.mode == Mode::Browse {
+            Some(self.browser().target()).filter(|path| !path.as_os_str().is_empty())
+        } else {
+            let mode = self.mode;
+            self.source()
+                .selected_entry()
+                .map(|entry| entry.output_path(mode))
+        }
+    }
+
+    /// The name prompt: letters type, Backspace deletes, Enter saves and
+    /// Esc leaves the favorite as it was. An empty name saved takes the
+    /// name away; the folder stays pinned, and is pinned if it was not.
+    fn handle_naming_key(&mut self, key: KeyEvent) {
+        let Some((_, text)) = &mut self.naming else {
+            return;
+        };
+        match key.code {
+            KeyCode::Esc => self.naming = None,
+            KeyCode::Enter => {
+                let (path, text) = self.naming.take().expect("open");
+                let name = text.trim();
+                let result = crate::favorites::path().and_then(|file| {
+                    let outcome = if name.is_empty() {
+                        crate::favorites::set_name(&file, &path, None)
+                    } else {
+                        crate::favorites::set_name(&file, &path, Some(name))
+                    };
+                    outcome.and_then(|()| crate::favorites::Index::read(&file))
+                });
+                match result {
+                    Ok(index) => {
+                        self.pinned = index;
+                        self.sources[mode_index(Mode::Favorites)] = None;
+                        self.set_transient_notice(if name.is_empty() {
+                            format!("Name removed: {}", path.display())
+                        } else {
+                            format!("Named @{name}: {}", path.display())
+                        });
+                    }
+                    Err(error) => self.set_notice(format!("Cannot name the favorite: {error}")),
+                }
+            }
+            KeyCode::Backspace => {
+                text.pop();
+            }
+            KeyCode::Char(c) if crate::keys::is_typed_text(&key) && !c.is_whitespace() => {
+                text.push(c);
+            }
+            _ => {}
+        }
+    }
+
     /// A message that stays until the next action replaces it, for anything
     /// the reader has to act on.
     fn set_notice(&mut self, text: String) {
@@ -1463,6 +1525,10 @@ impl Picker {
 
     fn handle_key(&mut self, key: KeyEvent) -> Action {
         self.last_click = None;
+        if self.naming.is_some() {
+            self.handle_naming_key(key);
+            return Action::Continue;
+        }
         if let Some(menu) = &mut self.menu {
             return match menu.handle(key) {
                 crate::action_menu::Decision::Stay => Action::Continue,
@@ -1568,17 +1634,30 @@ impl Picker {
                 self.menu = Some(crate::action_menu::Menu::new(target));
                 return Action::Continue;
             }
+            (KeyCode::Char('n'), true) => {
+                match self.pin_target() {
+                    None => self.set_notice(
+                        "Nothing selected. Switch to browse to name this folder.".into(),
+                    ),
+                    Some(path) => {
+                        // Opens on the name it has, so a name can be changed
+                        // as well as given.
+                        let current = crate::favorites::path()
+                            .and_then(|file| crate::favorites::read(&file))
+                            .ok()
+                            .and_then(|all| {
+                                all.into_iter()
+                                    .find(|f| f.path == path)
+                                    .and_then(|f| f.name)
+                            })
+                            .unwrap_or_default();
+                        self.naming = Some((path, current));
+                    }
+                }
+                return Action::Continue;
+            }
             (KeyCode::Char('b'), true) => {
-                let target = if self.in_tree() {
-                    Some(self.shown_tree().target()).filter(|path| !path.as_os_str().is_empty())
-                } else if self.mode == Mode::Browse {
-                    Some(self.browser().target()).filter(|path| !path.as_os_str().is_empty())
-                } else {
-                    let mode = self.mode;
-                    self.source()
-                        .selected_entry()
-                        .map(|entry| entry.output_path(mode))
-                };
+                let target = self.pin_target();
                 let message = match target {
                     None => "Nothing selected. Switch to browse to pin this folder.".into(),
                     Some(path) => match crate::favorites::path().and_then(|file| {
@@ -1784,6 +1863,35 @@ impl Picker {
         if let Some(keys) = &mut self.keys {
             keys.render(area, frame);
         }
+        if let Some((path, text)) = &self.naming {
+            // One line over the bottom border, where the key hints were, so
+            // the list and the folder being named stay in view.
+            let row = Rect::new(
+                area.x,
+                area.y + area.height.saturating_sub(1),
+                area.width,
+                1,
+            );
+            // The folder's own name: the end of a path is what tells folders
+            // apart, and the row has no room for all of it.
+            let shown = path.file_name().map_or_else(
+                || path.to_string_lossy().into_owned(),
+                |name| name.to_string_lossy().into_owned(),
+            );
+            let lead = format!(" Name for {}: @", fit(&shown, area.width as usize / 3));
+            let hint = "  Enter: save  Esc: cancel ";
+            let line = Line::from(vec![
+                Span::styled(lead.clone(), theme::HEADER),
+                Span::styled(text.clone(), theme::PROMPT),
+                Span::styled(hint, theme::INFO),
+            ]);
+            frame.render_widget(ratatui::widgets::Clear, row);
+            frame.render_widget(Paragraph::new(line), row);
+            let x = (lead.width() + text.width()) as u16;
+            if x < area.width {
+                frame.set_cursor_position((row.x + x, row.y));
+            }
+        }
     }
 
     fn render_screen(&mut self, area: Rect, frame: &mut ratatui::Frame) {
@@ -1830,6 +1938,36 @@ impl Picker {
         let scanning = !source.scan_done.load(Ordering::Acquire);
         let truncated = source.truncated.load(Ordering::Acquire);
 
+        let hints: Vec<String> = {
+            let mut hints = vec![
+                "Tab: browse".to_string(),
+                "^Space: keys".to_string(),
+                format!("S-Tab: {}", next_search(mode).label()),
+                "Enter: cd".to_string(),
+                // Named by where it leads, which from a list of
+                // places is wherever that list was opened from.
+                match (mode, self.origin) {
+                    (Mode::Recent | Mode::Favorites, Mode::Dirs | Mode::Files) => {
+                        format!("Right: {} from it", self.origin.label())
+                    }
+                    _ => "Right: browse it".to_string(),
+                },
+            ];
+            // The list of favorites is where they are kept, so
+            // the keys that change them come before the rest,
+            // which a narrow terminal cuts off.
+            if mode == Mode::Favorites {
+                hints.push("^N: name".to_string());
+                hints.push("^B: unpin".to_string());
+            }
+            hints.extend(
+                ["Esc: clear/exit", "^P: actions", "^B: pin", "F5: refresh"]
+                    .into_iter()
+                    .filter(|hint| mode != Mode::Favorites || *hint != "^B: pin")
+                    .map(str::to_string),
+            );
+            hints
+        };
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
@@ -1839,24 +1977,7 @@ impl Picker {
             .title_bottom(footer_line(
                 self.notice.as_deref(),
                 &fit_hints(
-                    &[
-                        "Tab: browse",
-                        "^Space: keys",
-                        &format!("S-Tab: {}", next_search(mode).label()),
-                        "Enter: cd",
-                        // Named by where it leads, which from a list of
-                        // places is wherever that list was opened from.
-                        &match (mode, self.origin) {
-                            (Mode::Recent | Mode::Favorites, Mode::Dirs | Mode::Files) => {
-                                format!("Right: {} from it", self.origin.label())
-                            }
-                            _ => "Right: browse it".to_string(),
-                        },
-                        "Esc: clear/exit",
-                        "^P: actions",
-                        "^B: pin",
-                        "F5: refresh",
-                    ],
+                    &hints.iter().map(String::as_str).collect::<Vec<_>>(),
                     list_area.width.saturating_sub(2) as usize,
                 ),
             ));
@@ -3282,6 +3403,7 @@ mod tests {
             notice: None,
             pinned: crate::favorites::Index::default(),
             menu: None,
+            naming: None,
             keys: None,
             tree_view: false,
             tree: None,
@@ -4119,6 +4241,55 @@ mod tests {
         assert!(picker.found.is_none(), "still in the search");
         assert!(picker.tree_query.is_empty());
         assert_eq!(picker.selected_path(), Some(root.join("src")));
+        drop(picker);
+        crate::testing::remove_tree(&root);
+    }
+
+    #[test]
+    fn ctrl_n_names_the_selected_folder_s_favorite_from_the_screen() {
+        let root = crate::testing::temp_dir().join(format!("tadoru-name-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("work")).unwrap();
+        let config = root.join("config");
+        std::fs::create_dir_all(&config).unwrap();
+        // The picker reads and writes favorites through the configuration
+        // folder, which the environment points at for this test.
+        // SAFETY: tests in this module that touch the environment run one at
+        // a time on their own folders.
+        unsafe { std::env::set_var("TADORU_CONFIG_DIR", &config) };
+        let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+        let ctrl = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL);
+        let mut picker = test_picker(root.clone(), Mode::Browse);
+        picker.browser().reveal(&root.join("work"));
+        assert_eq!(picker.browser().target(), root.join("work"));
+
+        picker.handle_key(ctrl('n'));
+        assert!(picker.naming.is_some());
+        for c in "wo rk".chars() {
+            picker.handle_key(key(KeyCode::Char(c)));
+        }
+        picker.handle_key(key(KeyCode::Enter));
+        assert!(picker.naming.is_none());
+        let file = crate::favorites::path().unwrap();
+        let named = crate::favorites::find(&file, "work")
+            .unwrap()
+            .expect("named");
+        assert_eq!(named.path, root.join("work"));
+        assert!(picker.pinned.contains(&root.join("work")));
+        assert!(picker.notice.as_deref().unwrap().starts_with("Named @work"));
+
+        // Opens on the name it has; Esc changes nothing, an empty name clears it.
+        picker.handle_key(ctrl('n'));
+        assert_eq!(picker.naming.as_ref().unwrap().1, "work");
+        picker.handle_key(key(KeyCode::Esc));
+        assert!(crate::favorites::find(&file, "work").unwrap().is_some());
+        picker.handle_key(ctrl('n'));
+        for _ in 0..4 {
+            picker.handle_key(key(KeyCode::Backspace));
+        }
+        picker.handle_key(key(KeyCode::Enter));
+        assert!(crate::favorites::find(&file, "work").unwrap().is_none());
+        assert!(picker.pinned.contains(&root.join("work")), "still pinned");
+        unsafe { std::env::remove_var("TADORU_CONFIG_DIR") };
         drop(picker);
         crate::testing::remove_tree(&root);
     }

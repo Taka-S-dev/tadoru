@@ -101,6 +101,7 @@ Esc clears the filter, and pressed again on an empty filter it quits. Ctrl-C alw
 | Shift-Tab | Change to the next kind of search. In browse, switch between the columns and a tree whose folders open in place and where typing searches everything below |
 | Ctrl-D / Ctrl-F / Ctrl-R / Ctrl-S | Go straight to dirs, files, recent or favorites (S for starred) |
 | Ctrl-B | Pin or unpin the selected folder as a favorite |
+| Ctrl-N | Name the selected folder's favorite, for `c @name`; an empty name takes the name away |
 | Ctrl-P | Open the action menu for the selected item |
 | Ctrl-A | When a scan stopped at its limit, collect the rest |
 | F5 | Refresh the list and the preview |

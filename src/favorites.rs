@@ -174,17 +174,7 @@ pub fn pin(
         check_name(name)?;
     }
     let directory = normalized(directory)?;
-    let parent = file
-        .parent()
-        .ok_or("favorites file has no parent directory")?;
-    fs::create_dir_all(parent)?;
-    let lock = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(file.with_extension("lock"))?;
-    lock.lock()?;
+    let _lock = lock(file)?;
     let mut favorites = read(file)?;
     let present = favorites
         .iter()
@@ -219,6 +209,47 @@ pub fn pin(
     } else {
         favorites.retain(|favorite| !same_path(&favorite.path, &directory));
     }
+    write(file, favorites)?;
+    Ok(add)
+}
+
+/// Gives the favorite for `directory` the name, or with None takes its name
+/// away; the folder stays pinned. A folder not pinned yet is pinned by a
+/// name, and left alone by None.
+pub fn set_name(file: &Path, directory: &Path, name: Option<&str>) -> Result<(), Error> {
+    let Some(_) = name else {
+        let directory = normalized(directory)?;
+        let lock = lock(file)?;
+        let mut favorites = read(file)?;
+        for favorite in &mut favorites {
+            if same_path(&favorite.path, &directory) {
+                favorite.name = None;
+            }
+        }
+        write(file, favorites)?;
+        drop(lock);
+        return Ok(());
+    };
+    pin(file, directory, Some(true), name).map(|_| ())
+}
+
+fn lock(file: &Path) -> Result<fs::File, Error> {
+    let parent = file
+        .parent()
+        .ok_or("favorites file has no parent directory")?;
+    fs::create_dir_all(parent)?;
+    let lock = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(file.with_extension("lock"))?;
+    lock.lock()?;
+    Ok(lock)
+}
+
+/// Replaces the file in one step, so a reader sees the old list or the new.
+fn write(file: &Path, favorites: Vec<Favorite>) -> Result<(), Error> {
     let text = toml::to_string(&Favorites {
         paths: Vec::new(),
         favorites,
@@ -229,7 +260,7 @@ pub fn pin(
     output.sync_all()?;
     drop(output);
     fs::rename(&temp, file)?;
-    Ok(add)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -294,6 +325,18 @@ mod tests {
             find(&file, "first").unwrap().map(|f| f.path),
             Some(a.clone())
         );
+        // A name can be taken away again; the folder stays pinned.
+        set_name(&file, &a, None).unwrap();
+        assert!(find(&file, "first").unwrap().is_none());
+        assert_eq!(read(&file).unwrap().len(), 2);
+        set_name(&file, &a, Some("again")).unwrap();
+        assert!(find(&file, "again").unwrap().is_some());
+        // A name can be taken away again; the folder stays pinned.
+        set_name(&file, &a, None).unwrap();
+        assert!(find(&file, "first").unwrap().is_none());
+        assert_eq!(read(&file).unwrap().len(), 2);
+        set_name(&file, &a, Some("again")).unwrap();
+        assert!(find(&file, "again").unwrap().is_some());
         for bad in ["", "@work", "my work", "a/b"] {
             assert!(check_name(bad).is_err(), "{bad:?}");
         }

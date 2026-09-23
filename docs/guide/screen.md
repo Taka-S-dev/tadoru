@@ -249,8 +249,11 @@ tadoru favorite remove @work
 tadoru favorite list
 ```
 
-A favorite can have a **name**, given with `--name` when pinning it; pinning a pinned folder again
-with a name gives it that name. The name is a single word without spaces or slashes, and is matched
+A favorite can have a **name**. On the screen, **Ctrl-N** opens a one-line prompt for the selected
+folder's name: Enter saves it, Esc leaves things as they were, and saving an empty name takes the
+name away while the folder stays pinned; a folder not pinned yet is pinned by naming it. From the
+command line the name is given with `--name` when pinning; pinning a pinned folder again with a
+name gives it that name. The name is a single word without spaces or slashes, and is matched
 without regard to case. Written as `@name`, it stands for the folder wherever a starting point is
 given: `c @work` searches from that favorite instead of the current folder, `c @work src` searches
 it for `src`, `cf @work` does the same for files, and `--root @work` does it for a picker started by
