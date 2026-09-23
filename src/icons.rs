@@ -1,5 +1,5 @@
 //! Display-only Nerd Font glyphs; never add these to paths or matcher input.
-//! Codepoints: https://github.com/ryanoasis/nerd-fonts/blob/master/glyphnames.json
+//! Codepoints: <https://github.com/ryanoasis/nerd-fonts/blob/master/glyphnames.json>
 
 use std::path::Path;
 
