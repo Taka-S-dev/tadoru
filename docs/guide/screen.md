@@ -243,12 +243,23 @@ Favorites can be managed from the command line too. Without a path, the current 
 ```text
 tadoru favorite add
 tadoru favorite add "C:\work\my project"
+tadoru favorite add --name work "C:\work\my project"
 tadoru favorite remove "C:\work\my project"
+tadoru favorite remove @work
 tadoru favorite list
 ```
 
-They are saved in `favorites.toml`, in the same folder as the configuration files. Saving takes a
-lock, so pinning from several shells at once does not lose updates.
+A favorite can have a **name**, given with `--name` when pinning it; pinning a pinned folder again
+with a name gives it that name. The name is a single word without spaces or slashes, and is matched
+without regard to case. Written as `@name`, it stands for the folder wherever a starting point is
+given: `c @work` searches from that favorite instead of the current folder, `c @work src` searches
+it for `src`, `cf @work` does the same for files, and `--root @work` does it for a picker started by
+hand or from a launcher. The favorites list shows the name before the path, so typing the name
+finds it there too. A name nobody has given is refused with a message, not searched for.
+
+They are saved in `favorites.toml`, in the same folder as the configuration files, one `[[favorite]]`
+table each; a file from before names existed is still read. Saving takes a lock, so pinning from
+several shells at once does not lose updates.
 
 ## Moving and history in browse
 

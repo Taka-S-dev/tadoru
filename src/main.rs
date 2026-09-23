@@ -16,7 +16,7 @@ mod shim;
 mod testing;
 mod tree;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
@@ -95,10 +95,16 @@ enum ConfigCommand {
 #[derive(Subcommand)]
 enum FavoriteCommand {
     /// Pin a directory. Defaults to the current directory.
-    Add { path: Option<PathBuf> },
-    /// Unpin a directory, including one that no longer exists.
+    Add {
+        path: Option<PathBuf>,
+        /// A name to ask for it by: `c @NAME` searches from it, and so does
+        /// `--root @NAME`. Pinning a pinned directory again gives it the name.
+        #[arg(long, value_name = "NAME")]
+        name: Option<String>,
+    },
+    /// Unpin a directory, including one that no longer exists, or a favorite by name as @NAME.
     Remove { path: Option<PathBuf> },
-    /// Print the pinned directories.
+    /// Print the pinned directories, with their names.
     List,
 }
 
@@ -110,7 +116,8 @@ pub struct PickArgs {
     /// Initial query. The TADORU_QUERY environment variable takes precedence.
     #[arg(long, default_value = "")]
     pub query: String,
-    /// Directory to scan. Defaults to the current directory.
+    /// Directory to scan, or a favorite by name as @NAME. Defaults to the
+    /// current directory, unless the query starts with @NAME.
     #[arg(long)]
     pub root: Option<PathBuf>,
     /// Print the only candidate without showing the picker.
@@ -235,24 +242,53 @@ fn main() -> ExitCode {
 
 fn favorite(command: FavoriteCommand) -> Result<(), Box<dyn std::error::Error>> {
     let file = favorites::path()?;
-    let (path, add) = match command {
+    let (path, add, name) = match command {
         FavoriteCommand::List => {
-            for path in favorites::read(&file)? {
-                println!("{}", path.display());
+            let all = favorites::read(&file)?;
+            // The name column is as wide as the longest name, so the paths
+            // line up whether or not a favorite has one.
+            let width = all
+                .iter()
+                .filter_map(|f| f.name.as_ref().map(|n| n.len() + 1))
+                .max()
+                .unwrap_or(0);
+            for favorite in all {
+                let name = favorite.name.map(|n| format!("@{n}")).unwrap_or_default();
+                if width == 0 {
+                    println!("{}", favorite.path.display());
+                } else {
+                    println!("{name:<width$}  {}", favorite.path.display());
+                }
             }
             return Ok(());
         }
-        FavoriteCommand::Add { path } => (path, true),
-        FavoriteCommand::Remove { path } => (path, false),
+        FavoriteCommand::Add { path, name } => (path, true, name),
+        FavoriteCommand::Remove { path } => (path, false, None),
     };
-    let path = path.unwrap_or(std::env::current_dir()?);
-    favorites::update(&file, &path, Some(add))?;
+    let path = match path {
+        Some(path) => favorite_or_path(&file, path)?,
+        None => std::env::current_dir()?,
+    };
+    favorites::pin(&file, &path, Some(add), name.as_deref())?;
     eprintln!(
-        "{}: {}",
+        "{}: {}{}",
         if add { "Pinned" } else { "Unpinned" },
-        path.display()
+        path.display(),
+        name.map(|n| format!(" as @{n}")).unwrap_or_default()
     );
     Ok(())
+}
+
+/// `@NAME` is the favorite called NAME; anything else is a path as given.
+fn favorite_or_path(file: &Path, given: PathBuf) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let text = given.to_string_lossy();
+    let Some(name) = text.strip_prefix('@') else {
+        return Ok(given);
+    };
+    match favorites::find(file, name)? {
+        Some(favorite) => Ok(favorite.path),
+        None => Err(format!("no favorite named @{name} (tadoru favorite list shows them)").into()),
+    }
 }
 
 fn pick(mut args: PickArgs) -> Result<Outcome, Box<dyn std::error::Error>> {
@@ -260,8 +296,22 @@ fn pick(mut args: PickArgs) -> Result<Outcome, Box<dyn std::error::Error>> {
         args.query = query;
     }
     let root = match args.root.take() {
-        Some(root) => root,
-        None => std::env::current_dir()?,
+        Some(root) => favorite_or_path(&favorites::path()?, root)?,
+        // Typed as the first word, `@NAME` picks where to search from, so a
+        // shell command can take it as its own first argument: `c @work src`.
+        None => match args.query.split_once(char::is_whitespace) {
+            Some((first, rest)) if first.starts_with('@') => {
+                let root = favorite_or_path(&favorites::path()?, PathBuf::from(first))?;
+                args.query = rest.trim_start().to_string();
+                root
+            }
+            None if args.query.starts_with('@') => {
+                let root = favorite_or_path(&favorites::path()?, PathBuf::from(&args.query))?;
+                args.query.clear();
+                root
+            }
+            _ => std::env::current_dir()?,
+        },
     };
     let root = std::path::absolute(&root)?;
     if !root.is_dir() {

@@ -502,6 +502,76 @@ fn favorites_cli_and_picker_share_persistent_storage_without_zoxide() {
         .unwrap();
     assert!(output.status.success());
     assert_eq!(String::from_utf8(output.stdout).unwrap(), listed);
+
+    // Pinned again with a name, the favorite gains it: the list shows it,
+    // and @name stands for the folder as a root, as the first word of a
+    // query, and in favorite remove.
+    check(
+        command()
+            .args(["favorite", "add", "--name", "work"])
+            .arg(&fixture.destination)
+            .output()
+            .unwrap(),
+    );
+    let output = command().args(["favorite", "list"]).output().unwrap();
+    let listed = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(listed.lines().count(), 1);
+    assert!(listed.starts_with("@work  "), "{listed}");
+    let inner = fixture.destination.join("inner");
+    std::fs::create_dir(&inner).unwrap();
+    let expected = format!(
+        "{}
+",
+        inner.display()
+    );
+    for (root, query) in [(Some("@Work"), ""), (None, "@work"), (None, "@work inn")] {
+        let mut run = command();
+        run.args(["pick", "--mode", "dirs", "--select-1"]);
+        if let Some(root) = root {
+            run.args(["--root", root]);
+        }
+        run.env("TADORU_QUERY", query);
+        let output = run.output().unwrap();
+        assert!(output.status.success(), "root {root:?} query {query:?}");
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap(),
+            expected,
+            "root {root:?} query {query:?}"
+        );
+    }
+    let output = command()
+        .args(["pick", "--mode", "dirs", "--root", "@nowhere"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("no favorite named @nowhere"));
+    // The favorites list shows the name before the path and cds to the path.
+    let output = command()
+        .args(["pick", "--mode", "favorites", "--select-1"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        format!(
+            "{}
+",
+            fixture.destination.display()
+        )
+    );
+    check(
+        command()
+            .args(["favorite", "remove", "@work"])
+            .output()
+            .unwrap(),
+    );
+    check(
+        command()
+            .args(["favorite", "add"])
+            .arg(&fixture.destination)
+            .output()
+            .unwrap(),
+    );
+    std::fs::remove_dir(&inner).unwrap();
     std::fs::remove_dir(&fixture.destination).unwrap();
     check(
         command()

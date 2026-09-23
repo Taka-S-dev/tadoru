@@ -11,6 +11,7 @@ The name is Japanese (辿る) for following a path to where it leads. Written in
 - You remember the folder's name: `c openssl`
 - You only know a file's name: `cf Cargo.toml` takes you to the folder holding it
 - You want to look around: open `c` and press Tab to browse
+- You go there often: pin it as `work`, and `c @work` searches from it wherever you are
 
 `c`, `cf`, browse and favorites need nothing else.
 `z`, `zi` and recent read the history kept by `zoxide` (if it is missing, the screen says how to get it).

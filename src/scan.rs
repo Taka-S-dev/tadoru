@@ -322,19 +322,45 @@ pub fn recent() -> Result<Vec<PathBuf>, String> {
 }
 
 fn push_saved(injector: &Injector<Entry>, mode: Mode) -> Result<(), String> {
-    let paths = if mode == Mode::Favorites {
-        crate::favorites::path()
-            .and_then(|path| crate::favorites::read(&path))
-            .map_err(|error| error.to_string())?
-    } else {
-        recent()?
-    };
     // A saved list is not relative to anything, so the whole path is shown
     // and the root goes unused.
     let root = Arc::new(PathBuf::new());
-    for path in paths {
-        let entry = Entry::new(&root, &path, path.to_string_lossy());
+    let push = |entry: Entry| {
         injector.push(entry, |item, cols| cols[0] = item.display.as_str().into());
+    };
+    if mode == Mode::Favorites {
+        let favorites = crate::favorites::path()
+            .and_then(|path| crate::favorites::read(&path))
+            .map_err(|error| error.to_string())?;
+        // The names make a column, as wide as the longest, so the paths line
+        // up whether or not a favorite has one.
+        let width = favorites
+            .iter()
+            .filter_map(|f| f.name.as_ref().map(|n| n.chars().count() + 1))
+            .max()
+            .unwrap_or(0);
+        for favorite in favorites {
+            // A named favorite shows its name first, so the name is what
+            // typing matches; the row still stands for the path.
+            let shown = if width == 0 {
+                favorite.path.to_string_lossy()
+            } else {
+                let name = favorite
+                    .name
+                    .as_ref()
+                    .map(|n| format!("@{n}"))
+                    .unwrap_or_default();
+                std::borrow::Cow::Owned(format!(
+                    "{name:<width$}  {}",
+                    favorite.path.to_string_lossy()
+                ))
+            };
+            push(Entry::new(&root, &favorite.path, shown));
+        }
+        return Ok(());
+    }
+    for path in recent()? {
+        push(Entry::new(&root, &path, path.to_string_lossy()));
     }
     Ok(())
 }
