@@ -97,6 +97,21 @@ When a list is longer than the screen, a thick line over the list's right border
 the line right of the middle column) shows which part of it is on screen. If the thick line does
 not reach the bottom, there are more items below. Nothing is drawn when everything fits.
 
+## What typing matches
+
+Typing matches the letters in order with anything between them, so `opsl` finds `openssl`, and
+the best matches come first. Upper and lower case are not told apart. The marks fzf uses narrow it:
+
+| Typed | Matches |
+|---|---|
+| `'openssl` | The letters side by side, as typed |
+| `^src` | At the start of the path |
+| `.md$` | At the end of the path |
+| `!test` | Leaves out paths with `test` in them |
+
+Words with a space between them must all match: `'openssl .h$` finds the headers with `openssl` in
+their path. The path is the one shown in the list; in the tree, it is the path from the top line.
+
 ## Scan limit
 
 dirs and files keep every path they find in memory until tadoru exits, which is what lets a few

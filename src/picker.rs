@@ -3999,6 +3999,43 @@ mod tests {
     }
 
     #[test]
+    fn typing_takes_fzf_s_marks_for_exact_start_end_and_leaving_out() {
+        let root = crate::testing::temp_dir().join(format!("tadoru-exact-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("a_x_b_c.txt"), "").unwrap();
+        std::fs::write(root.join("abc.txt"), "").unwrap();
+        std::fs::write(root.join("abc.md"), "").unwrap();
+        let matched = |query: &str| {
+            let mut source = Source::start(Mode::Files, &root, &Config::default(), 0);
+            source.finish_scan();
+            source.set_query(query, false);
+            while source.matcher.tick(TICK_MS).running {}
+            let snapshot = source.matcher.snapshot();
+            let mut names: Vec<String> = (0..snapshot.matched_item_count())
+                .filter_map(|n| snapshot.get_matched_item(n))
+                .map(|item| item.data.display.clone())
+                .collect();
+            names.sort();
+            names
+        };
+        // Plain letters match in order with gaps; a leading ' wants them
+        // side by side, and ! leaves out what matches.
+        assert_eq!(matched("abc"), ["a_x_b_c.txt", "abc.md", "abc.txt"]);
+        assert_eq!(matched("'abc"), ["abc.md", "abc.txt"]);
+        assert_eq!(matched("!'abc"), ["a_x_b_c.txt"]);
+        // After !, the letters are taken side by side even without the '.
+        assert_eq!(matched("!abc"), ["a_x_b_c.txt"]);
+        // ^ holds to the start of the path and $ to its end.
+        assert_eq!(matched("^a_x"), ["a_x_b_c.txt"]);
+        assert_eq!(matched(".md$"), ["abc.md"]);
+        // Words apart must all match.
+        assert_eq!(matched("'abc txt$"), ["abc.txt"]);
+        // Upper and lower case are not told apart.
+        assert_eq!(matched("'ABC.MD"), ["abc.md"]);
+        crate::testing::remove_tree(&root);
+    }
+
+    #[test]
     fn going_back_in_history_during_a_tree_search_shows_the_new_folder() {
         let root =
             crate::testing::temp_dir().join(format!("tadoru-treehist-{}", std::process::id()));

@@ -83,7 +83,8 @@ Tab で検索と browse を行き来する。browse から戻る先は直前に�
 `cf` で開いたなら files と browse の往復になる。検索の種類は Shift-Tab で
 dirs → files → recent → favorites と切り替え、browse では 3 列とツリー表示を切り替える。
 上枠のモード名はクリックでも切り替わる。
-どのモードでも、文字を打てば絞り込み、Enter でそこへ cd。
+どのモードでも、文字を打てば絞り込み、Enter でそこへ cd。文字は間が空いていても順に一致する（あいまい一致）。
+`'word` のように先頭に `'` を付けると、fzf と同じく続けて並んだものだけに一致する（[書き方の一覧](docs/guide/screen.md#what-typing-matches)）。
 Esc は絞り込みを消し、空の状態でもう一度押すと終了する。Ctrl-C はいつでも終了する。
 
 | キー | 動作 |

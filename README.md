@@ -85,7 +85,8 @@ Tab goes between the search and browse. Browse goes back to the search used last
 `cf` Tab goes between files and browse. Shift-Tab changes the kind of search:
 dirs → files → recent → favorites, and in browse it switches between the columns and a tree.
 The mode names on the top border also switch with a click.
-In every mode, typing filters the list and Enter cds there.
+In every mode, typing filters the list and Enter cds there. The letters match in order with gaps;
+`'word` asks for them side by side, as in fzf ([what typing matches](docs/guide/screen.md#what-typing-matches)).
 Esc clears the filter, and pressed again on an empty filter it quits. Ctrl-C always quits.
 
 | Key | What it does |
