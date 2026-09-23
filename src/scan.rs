@@ -197,6 +197,13 @@ impl Drop for Worker {
     }
 }
 
+/// Whether a recursive scan may start at `root`, with the reason when not.
+/// Checked before a search opens there, so a network folder can be shown in
+/// browse instead of as a refused search.
+pub fn scan_allowed(root: &Path) -> Result<(), String> {
+    check_scan_root(root)
+}
+
 #[cfg(windows)]
 fn check_scan_root(root: &Path) -> Result<(), String> {
     check_windows_volume(root)?;

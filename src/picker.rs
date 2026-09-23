@@ -370,12 +370,13 @@ pub fn run(args: PickArgs, root: PathBuf, config: Config) -> Result<Option<PathB
             Some(format!("Cannot load favorite markers: {error}")),
         ),
     };
+    let (mode, refused) = opening_screen(args.mode, &root);
     let mut picker = Picker {
         sources: std::array::from_fn(|_| None),
-        browser: (args.mode == Mode::Browse).then(|| Browser::new(root.clone())),
+        browser: (mode == Mode::Browse).then(|| Browser::new(root.clone())),
         browser_root: root.clone(),
         search_mode: first_search(args.mode),
-        mode: args.mode,
+        mode,
         query: String::new(),
         root,
         config,
@@ -415,6 +416,9 @@ pub fn run(args: PickArgs, root: PathBuf, config: Config) -> Result<Option<PathB
         mouse_paths: Vec::new(),
         last_click: None,
     };
+    if let Some(reason) = refused {
+        picker.set_notice(reason);
+    }
     picker.set_query(&args.query);
 
     if args.select_1 && args.mode != Mode::Browse {
@@ -452,6 +456,20 @@ pub fn run(args: PickArgs, root: PathBuf, config: Config) -> Result<Option<PathB
     };
     drop(picker);
     result.map(|entry| entry.map(|e| e.output_path(mode)))
+}
+
+/// The screen a picker opens in, given the one asked for and where. A search
+/// that cannot scan its root, such as `c @net` on a favorite that is a share,
+/// opens in browse instead, and says why: a refused search shows nothing but
+/// the refusal, while browse lists the folder one level at a time.
+fn opening_screen(asked: Mode, root: &Path) -> (Mode, Option<String>) {
+    if !matches!(asked, Mode::Dirs | Mode::Files) {
+        return (asked, None);
+    }
+    match crate::scan::scan_allowed(root) {
+        Ok(()) => (asked, None),
+        Err(reason) => (Mode::Browse, Some(format!("Opened in browse: {reason}"))),
+    }
 }
 
 fn mode_index(mode: Mode) -> usize {
@@ -564,6 +582,12 @@ impl Picker {
         }
         let search = self.mode;
         self.browse_at(path);
+        // A share cannot be searched, so the search is not resumed there;
+        // browse of it is what there is.
+        if let Err(reason) = crate::scan::scan_allowed(path) {
+            self.set_notice(format!("Opened in browse: {reason}"));
+            return;
+        }
         self.switch_to(search);
         self.set_query("");
     }
@@ -4729,6 +4753,22 @@ mod tests {
         drop(_config);
         drop(picker);
         crate::testing::remove_tree(&root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_search_asked_for_on_a_share_opens_in_browse_and_says_why() {
+        // The share is never touched: the path's prefix refuses the scan.
+        let share = Path::new(r"\\server\share");
+        let (mode, notice) = opening_screen(Mode::Dirs, share);
+        assert_eq!(mode, Mode::Browse);
+        assert!(notice.unwrap().starts_with("Opened in browse: "));
+        assert_eq!(opening_screen(Mode::Files, share).0, Mode::Browse);
+        // Browse itself is not changed.
+        assert_eq!(opening_screen(Mode::Browse, share), (Mode::Browse, None));
+        // A local folder opens in the search asked for.
+        let local = std::env::current_dir().unwrap();
+        assert_eq!(opening_screen(Mode::Dirs, &local), (Mode::Dirs, None));
     }
 
     #[test]

@@ -136,11 +136,14 @@ easiest way to hit the limit, so go back somewhere deeper before switching.
 
 On Windows, recursive `dirs` and `files` scans of network locations are refused before they start.
 This covers UNC paths, drive letters mapped to network drives, and drives whose type cannot be
-determined. When a scan is refused, press Tab to switch to `browse`; F5 does not lift the
-restriction. Typing in the tree view is refused the same way, and the tree says so; its folders can
-still be opened one at a time. The folder the scan root links to is checked too, and reparse points
-such as junctions are not followed during a scan. `browse` still works, but listing and previewing
-folders does go over the network. Network mounts on Linux and macOS are not detected.
+determined. A search asked to start on one, as `c @net` does when the favorite is a share, opens in
+`browse` instead and says why at the bottom of the screen; so does Right on such a place in the
+favorites or recent list. From a search that has moved onto one, press Tab to switch to `browse`; F5
+does not lift the restriction. Typing in the tree view is refused the same way, and the tree says
+so; its folders can still be opened one at a time. The folder the scan root links to is checked too,
+and reparse points such as junctions are not followed during a scan. `browse` still works, but
+listing and previewing folders does go over the network. Network mounts on Linux and macOS are not
+detected.
 
 cmd cannot use a `\\server\share` path as its current folder, so in cmd a chosen folder on a share
 is entered with `pushd`: Windows gives the share a free drive letter, such as `Z:`, and cmd goes
