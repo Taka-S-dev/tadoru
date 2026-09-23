@@ -290,8 +290,9 @@ Mode names sit on the top border and the path on the row below. The modes never 
 belong on the border; the path changes with every move, so it gets a row of its own. Both can be
 clicked.
 
-The screen uses the full height of the terminal. Shell output that was on screen is scrolled up out
-of the way, and the screen is put back when tadoru exits; that output stays in the scrollback.
+The screen takes the whole window, on the terminal's alternate screen as fzf does without
+`--height`. The shell's screen is not scrolled or written over, and it comes back as it was when
+tadoru exits.
 
 `c -` goes back to where you were before the last successful `c`, `cf`, `z` or `zi` in the same
 shell. Cancelling, a failure, or a move to the same place does not change it, and a plain `cd` is

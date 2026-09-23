@@ -1049,8 +1049,8 @@ impl Picker {
                     }
                 }
                 Event::Key(key) => key,
-                Event::Resize(_, rows) => {
-                    terminal.reopen(rows)?;
+                Event::Resize(..) => {
+                    terminal.reopen()?;
                     continue;
                 }
                 _ => continue,
@@ -1068,7 +1068,6 @@ impl Picker {
                     let (action, target) = *request;
                     let name = action.name().to_string();
                     if action.run_mode() == crate::actions::RunMode::Terminal {
-                        let resume_top = terminal.get_frame().area().y;
                         drop(terminal);
                         let action_screen = ActionScreen::enter()?;
                         eprintln!("\n{name}\nTarget: {}", target.display());
@@ -1080,7 +1079,7 @@ impl Picker {
                         eprintln!("\n{message}\nPress Enter or Esc to return to tadoru.");
                         let pause = wait_for_return();
                         drop(action_screen);
-                        terminal = TerminalGuard::enter_at(Some(resume_top), self.config.mouse)?;
+                        terminal = TerminalGuard::enter(self.config.mouse)?;
                         self.set_notice(message);
                         pause?;
                         self.preview = None;
@@ -3088,16 +3087,6 @@ fn spread_marks(
     }
 }
 
-/// The whole window.
-///
-/// Sizing to the space below the cursor left the shell history at the top, so
-/// a few lines of it cost the listing rows it could have used. Taking the full
-/// height scrolls that history up instead, as `fzf --height 100%` does, and it
-/// is still in the scrollback afterwards.
-fn inline_height(rows: u16) -> u16 {
-    rows.max(1)
-}
-
 /// The picker draws on stderr so stdout stays clean for the selected path.
 /// Keep command output separate from the inline picker and shell history.
 struct ActionScreen;
@@ -3142,27 +3131,22 @@ fn wait_for_return() -> Result<(), Error> {
     Ok(())
 }
 
-/// Owns raw mode and the inline viewport, including error cleanup.
+/// Owns raw mode and the alternate screen, including error cleanup.
 struct TerminalGuard {
     terminal: Terminal<CrosstermBackend<io::Stderr>>,
     mouse: bool,
 }
 
 impl TerminalGuard {
-    /// Opens a viewport over the whole window, like fzf --height 100%, so the
-    /// shell history scrolls up rather than eating rows the listing could use.
+    /// Takes the whole window on the terminal's alternate screen, as fzf does
+    /// without --height, so the listing gets every row and the shell's screen
+    /// comes back untouched on exit. Drawn inline over the shell's screen
+    /// instead, the rows it scrolled away counted as the output of the `c`
+    /// command, and a terminal that pins the command line of long output to
+    /// its top edge, as the one in VS Code does, covered the tabs and prompt.
     fn enter(mouse: bool) -> Result<Self, Error> {
-        Self::enter_at(None, mouse)
-    }
-
-    fn enter_at(top: Option<u16>, mouse: bool) -> Result<Self, Error> {
-        let (_, rows) = crossterm::terminal::size()?;
-        if let Some(top) = top {
-            let top = top.min(rows.saturating_sub(1));
-            crossterm::execute!(io::stderr(), crossterm::cursor::MoveTo(0, top))?;
-        }
         enable_raw_mode()?;
-        match Self::open(rows) {
+        match Self::open() {
             Ok(terminal) => {
                 let guard = Self { terminal, mouse };
                 if mouse {
@@ -3177,25 +3161,32 @@ impl TerminalGuard {
         }
     }
 
-    /// Creates a viewport covering a `rows`-tall screen.
-    fn open(rows: u16) -> Result<Terminal<CrosstermBackend<io::Stderr>>, Error> {
-        let height = inline_height(rows);
+    fn open() -> Result<Terminal<CrosstermBackend<io::Stderr>>, Error> {
+        crossterm::execute!(io::stderr(), crossterm::terminal::EnterAlternateScreen)?;
         let terminal = Terminal::with_options(
             CrosstermBackend::new(io::stderr()),
             TerminalOptions {
-                viewport: Viewport::Inline(height),
+                viewport: Viewport::Fullscreen,
             },
-        )?;
-        Ok(terminal)
+        );
+        match terminal {
+            Ok(mut terminal) => {
+                terminal.clear()?;
+                Ok(terminal)
+            }
+            Err(err) => {
+                let _ =
+                    crossterm::execute!(io::stderr(), crossterm::terminal::LeaveAlternateScreen);
+                Err(err.into())
+            }
+        }
     }
 
-    /// Rebuilds the viewport after the window changed size. An inline viewport's
-    /// height is fixed when it is created, so growing the window would otherwise
-    /// leave the extra rows unused, and shrinking it would draw off screen.
-    fn reopen(&mut self, rows: u16) -> Result<(), Error> {
+    /// Clears the screen after the window changed size; the next draw takes
+    /// the new size. Cells outside the old area would otherwise keep whatever
+    /// the terminal put there.
+    fn reopen(&mut self) -> Result<(), Error> {
         self.terminal.clear()?;
-        crossterm::execute!(io::stderr(), crossterm::cursor::MoveTo(0, 0))?;
-        self.terminal = Self::open(rows)?;
         Ok(())
     }
 }
@@ -3218,10 +3209,8 @@ impl Drop for TerminalGuard {
         if self.mouse {
             let _ = crossterm::execute!(io::stderr(), DisableMouseCapture);
         }
-        // Wipe the viewport so the prompt comes back where the picker opened.
-        let top = self.terminal.get_frame().area().y;
-        let _ = self.terminal.clear();
-        let _ = crossterm::execute!(io::stderr(), crossterm::cursor::MoveTo(0, top));
+        // Back to the shell's screen, with the prompt where the picker opened.
+        let _ = crossterm::execute!(io::stderr(), crossterm::terminal::LeaveAlternateScreen);
         let _ = disable_raw_mode();
         let _ = io::stderr().flush();
     }
@@ -5710,15 +5699,6 @@ mod tests {
             pieces(&line),
             vec![("  ".into(), false), ("docs".into(), false)]
         );
-    }
-
-    #[test]
-    fn the_picker_takes_the_whole_window_whatever_the_history_above() {
-        // Shell history costs the listing no rows: it scrolls up.
-        assert_eq!(inline_height(50), 50);
-        assert_eq!(inline_height(12), 12);
-        // A terminal that reports nothing still gets a row to draw in.
-        assert_eq!(inline_height(0), 1);
     }
 
     #[test]
