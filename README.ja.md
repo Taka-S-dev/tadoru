@@ -5,6 +5,8 @@
 **tadoru**（辿る）は、cmd.exe / PowerShell / bash で同じ操作感のディレクトリ移動ツール。
 数文字打って Enter で目的地へ辿り着き、階層を 1 段ずつ辿ることもできる。Rust + ratatui。
 
+![c を打ち、数文字で絞り込み、Enter でそのフォルダへ移動](docs/images/jump.gif)
+
 - フォルダ名を覚えている: `c openssl`
 - ファイル名だけ分かる: `cf Cargo.toml` で、そのファイルの親フォルダへ移動
 - 名前を知らず中を見たい: `c` を開き、Tab で browse に切り替える
@@ -78,6 +80,8 @@ zoxide の `z` と `zi` には手を付けない。詳しくは[導入の詳細�
 [シェルなしで起動する（英語）](docs/guide/setup.md#starting-without-a-shell)を参照。
 
 ## 画面
+
+![Tab で 3 列の browse、Shift-Tab でツリー表示、そこで文字を打つと下の階層全体を検索、Right で一致した場所までツリーを開く](docs/images/screen.gif)
 
 Tab で検索と browse を行き来する。browse から戻る先は直前に使っていた検索で、
 `cf` で開いたなら files と browse の往復になる。検索の種類は Shift-Tab で

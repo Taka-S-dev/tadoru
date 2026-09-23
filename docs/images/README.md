@@ -2,10 +2,14 @@
 
 Images used by the README go here.
 
-| File | What to capture |
+| File | What it shows |
 |---|---|
-| `browse.png` | Browse's three columns, with the modes on the top border, the path row and both side columns in view |
-| `actions.png` | The Ctrl-P action menu, with the keys at the left of the rows readable |
+| `jump.gif` | The one thing tadoru is for: `c`, a few letters, Enter, and the shell is in the folder |
+| `screen.gif` | Tab into browse, Shift-Tab into the tree, a folder opened in place, a search typed there, Right to open the tree to the match, and Enter |
 
-Make the terminal fairly wide, open `c`, press Tab to switch to browse, then capture.
+Each GIF is a series of screenshots of a WezTerm window, one per key press, joined with the
+pauses that make it readable, and with the key pressed written under the window. It is recorded in a made-up folder tree mapped to a spare drive
+letter, so no real path appears, and with a configuration folder that holds `icons = true` and
+nothing else, so no favorites or actions of the recording machine show up.
+
 Before adding an image, check that no personal folder names or other private names show in it.

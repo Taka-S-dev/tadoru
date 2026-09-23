@@ -6,6 +6,8 @@
 Type a few letters and press Enter to cd there, or walk the tree one level at a time.
 The name is Japanese (辿る) for following a path to where it leads. Written in Rust with ratatui.
 
+![c, a few letters, Enter: the shell is in the folder](docs/images/jump.gif)
+
 - You remember the folder's name: `c openssl`
 - You only know a file's name: `cf Cargo.toml` takes you to the folder holding it
 - You want to look around: open `c` and press Tab to browse
@@ -80,6 +82,8 @@ chosen folder instead: `tadoru pick --on-accept "Open shell here"` starts a shel
 [starting without a shell](docs/guide/setup.md#starting-without-a-shell).
 
 ## The screen
+
+![Tab browses the folder in columns, Shift-Tab draws it as a tree, typing there searches everything below, and Right opens the tree down to the match](docs/images/screen.gif)
 
 Tab goes between the search and browse. Browse goes back to the search used last, so after
 `cf` Tab goes between files and browse. Shift-Tab changes the kind of search:
