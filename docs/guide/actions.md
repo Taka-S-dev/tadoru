@@ -25,6 +25,7 @@ keys and press Enter, or click.
 | c | Copy path |
 | s | Open shell here |
 | t | Open temporary copy (TEMP_) |
+| Ctrl-X | Switch what follows an action: the screen stays, or tadoru quits |
 
 `o` opens, as it does in yazi: a file with its default application, and a folder in the file
 manager, as a double click would. `f` shows the item in the file manager instead, so for a file it
@@ -40,6 +41,18 @@ list it would look like an action on the row, so it sits apart. Filtering does n
 of them, or when you only remember a name. Tab goes back to waiting for a key and clears what you
 typed, so the next key applies to the whole list again. While you type, the left of each row shows
 `alt+f` and so on: holding Alt runs an action while typing, even one the filter hides.
+
+## After an action
+
+Once an action has run, the screen stays, so another can follow or a different item be picked; the
+panel's title reads `Actions`. Started with `--after-action quit`, as a launcher would (see
+[setup](setup.md#setting-it-up-by-hand)), tadoru quits once the action has run, and the title reads
+`Actions, then quit`. **Ctrl-X** in the menu switches between the two for the rest of the run, for
+the time a launcher session turns out to need several actions, or a shell session only one.
+`--after-action cd` quits as well and prints the folder for the shell function to cd into, the
+file's folder for a file: with it, `c`, an editor from the menu and quitting the editor leave the
+shell in that folder. An action can fix its own ending with `then` in actions.json, which wins over
+the switch; the built-in actions have none.
 
 ## Built-in actions
 
@@ -131,6 +144,7 @@ keep working. Configuration found in the folders you move to is never read or ru
 | `run` | `terminal` closes the screen for a moment, shows the output and exit code, and returns on Enter or Esc. `detach` starts it in the background without showing output. Default `terminal` |
 | `cwd` | The working folder. Default `{dir}`. A relative path is taken from the configuration folder |
 | `key` | One character to press while the menu waits for a key. Leave it out for no key |
+| `then` | What follows the action: `stay` on the screen, `quit`, or `cd`, which quits and prints the folder for the shell to cd into. Left out, the action follows `--after-action` and the Ctrl-X switch; see [after an action](#after-an-action) |
 | `include_defaults` | `false` shows only your own actions. Default `true` |
 
 `key` must be a single letter or digit. `/` cannot be used, because it moves to the input box. A key

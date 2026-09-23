@@ -18,6 +18,19 @@ pub enum RunMode {
     Detach,
 }
 
+/// What follows an action run from the menu: the screen stays for the next
+/// one, tadoru quits, or it quits and prints the folder for the shell to cd
+/// into. A run has a default, `--after-action`, which Ctrl-X in the menu
+/// switches; an action with a `then` of its own in actions.json keeps it.
+#[derive(Clone, Copy, Default, Deserialize, PartialEq, Eq, Debug, clap::ValueEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum Then {
+    #[default]
+    Stay,
+    Quit,
+    Cd,
+}
+
 #[derive(Clone, Copy, Default, Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum Target {
@@ -42,6 +55,8 @@ pub struct Definition {
     cwd: Option<String>,
     #[serde(default)]
     key: Option<String>,
+    #[serde(default)]
+    pub then: Option<Then>,
 }
 
 #[derive(Deserialize)]
@@ -110,6 +125,15 @@ impl Action {
             Self::Custom { definition, .. } => definition.run,
             Self::Shell => RunMode::Terminal,
             _ => RunMode::Detach,
+        }
+    }
+
+    /// What this action says should follow it, if it says anything; the
+    /// built-in actions leave it to the run.
+    pub fn then(&self) -> Option<Then> {
+        match self {
+            Self::Custom { definition, .. } => definition.then,
+            _ => None,
         }
     }
 
@@ -707,12 +731,26 @@ pub fn test_definition(name: &str, key: Option<&str>) -> Definition {
         run: RunMode::Detach,
         cwd: None,
         key: key.map(str::to_string),
+        then: None,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_action_may_say_what_follows_it_and_by_default_says_nothing() {
+        let file: File = serde_json::from_str(
+            r#"{"version":1,"actions":[
+                {"name":"edit","program":"x","then":"cd"},
+                {"name":"build","program":"x","then":"quit"},
+                {"name":"look","program":"x"}]}"#,
+        )
+        .unwrap();
+        let then: Vec<_> = file.actions.iter().map(|a| a.then).collect();
+        assert_eq!(then, [Some(Then::Cd), Some(Then::Quit), None]);
+    }
 
     struct Fixture(PathBuf);
     impl Fixture {
@@ -736,6 +774,7 @@ mod tests {
                     run: RunMode::Terminal,
                     cwd: None,
                     key: None,
+                    then: None,
                 },
                 config_dir: self.0.clone(),
             }

@@ -81,6 +81,7 @@ Change directory only on `0`. A wrapper that does not tell `1` from `2` hides er
 | `--root <folder>` | current folder | Where the search starts. `:name` is the favorite of that name; so is `:name` as the first word of the query |
 | `--select-1` | off | With exactly one candidate, print it without opening the screen |
 | `--on-accept <action>` | none | Run an action on the chosen folder instead of printing it; see below |
+| `--after-action <what>` | `stay` | After an action from the menu: `stay` on the screen, `quit`, or `cd`, which quits and prints the folder for the shell to cd into. Ctrl-X in the menu switches between stay and quit; see [after an action](actions.md#after-an-action) |
 
 ## Starting without a shell
 

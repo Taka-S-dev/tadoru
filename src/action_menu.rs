@@ -9,7 +9,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Wrap};
 use unicode_width::UnicodeWidthStr;
 
-use crate::actions::{self, Action, RunMode};
+use crate::actions::{self, Action, RunMode, Then};
 
 /// Joins a key to what it runs, as in `f → Open in file manager`.
 pub(crate) const ARROW: &str = " → ";
@@ -53,6 +53,9 @@ pub struct Menu {
     /// The menu opens on its keys and only takes text once asked, so a single
     /// letter runs an action instead of needing a modifier held with it.
     filtering: bool,
+    /// What follows an action run from here. Shown in the title, switched
+    /// with Ctrl-X, and handed back to the picker for the rest of the run.
+    pub after: Then,
 }
 
 impl Menu {
@@ -75,11 +78,17 @@ impl Menu {
             mouse_tools: Rect::default(),
             mouse_first: 0,
             filtering: false,
+            after: Then::Stay,
         }
     }
 
     /// Which action a letter runs. A setting that claims a letter takes it from
     /// the built-in action that had it, so one key never runs two things.
+    pub fn then(mut self, after: Then) -> Self {
+        self.after = after;
+        self
+    }
+
     fn owner(&self, ch: char) -> Option<usize> {
         let ch = ch.to_ascii_lowercase();
         self.items
@@ -146,6 +155,15 @@ impl Menu {
             (KeyCode::Char('u'), true) => {
                 self.query.clear();
                 self.filter();
+            }
+            // Between staying and quitting; cd counts as quitting here, so
+            // from it the switch goes to stay.
+            (KeyCode::Char('x'), true) => {
+                self.after = if self.after == Then::Stay {
+                    Then::Quit
+                } else {
+                    Then::Stay
+                };
             }
             (KeyCode::Tab, _) | (KeyCode::BackTab, _) => self.set_filtering(!self.filtering),
             (KeyCode::Char(ch), false) if crate::keys::is_typed_text(&key) => {
@@ -255,7 +273,7 @@ impl Menu {
     /// action rather than the ones a filter leaves, so typing does not make
     /// the panel jump. A screen too small to float in gets the whole area.
     fn panel(&self, area: Rect) -> Rect {
-        const MIN_WIDTH: u16 = 46;
+        const MIN_WIDTH: u16 = 48;
         let widest = self
             .items
             .iter()
@@ -281,16 +299,21 @@ impl Menu {
         self.mouse_rows = Rect::default();
         self.mouse_tools = Rect::default();
         let area = self.panel(area);
-        let inner = open_panel(
-            area,
-            frame,
-            " Actions ",
-            if self.filtering {
-                " Enter: run  Tab: keys  Esc: close "
-            } else {
-                " Enter: run  Tab: filter  Esc: close "
-            },
-        );
+        // The title says what follows an action, and the footer names what
+        // Ctrl-X would make follow instead, as the other hints name where a
+        // key leads.
+        let title = match self.after {
+            Then::Stay => " Actions ",
+            Then::Quit => " Actions, then quit ",
+            Then::Cd => " Actions, then cd ",
+        };
+        let footer = match (self.filtering, self.after == Then::Stay) {
+            (true, true) => " Enter: run  Tab: keys  ^X: quit after  Esc ",
+            (true, false) => " Enter: run  Tab: keys  ^X: stay after  Esc ",
+            (false, true) => " Enter: run  Tab: filter  ^X: quit after  Esc ",
+            (false, false) => " Enter: run  Tab: filter  ^X: stay after  Esc ",
+        };
+        let inner = open_panel(area, frame, title, footer);
         let head = self.head();
         // A rule above the zone, so it reads as separate from the list rather
         // than as its last row. It follows the list instead of sitting at the
@@ -511,6 +534,20 @@ fn tail(text: &str, width: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ctrl_x_switches_what_follows_an_action_between_staying_and_quitting() {
+        let ctrl_x = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL);
+        let mut menu = Menu::new(PathBuf::from("x")).then(Then::Quit);
+        assert!(matches!(menu.handle(ctrl_x), Decision::Stay));
+        assert_eq!(menu.after, Then::Stay);
+        menu.handle(ctrl_x);
+        assert_eq!(menu.after, Then::Quit);
+        // cd leaves the screen too, so from it the switch goes to stay.
+        let mut menu = Menu::new(PathBuf::from("x")).then(Then::Cd);
+        menu.handle(ctrl_x);
+        assert_eq!(menu.after, Then::Stay);
+    }
     use ratatui::{Terminal, backend::TestBackend};
 
     #[test]
@@ -574,6 +611,7 @@ mod tests {
             mouse_tools: Rect::default(),
             mouse_first: 0,
             filtering: false,
+            after: Then::Stay,
         }
     }
 
@@ -818,6 +856,7 @@ mod tests {
             mouse_tools: Rect::default(),
             mouse_first: 0,
             filtering: true,
+            after: Then::Stay,
         };
         menu.handle(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::ALT));
         menu.handle(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL));
@@ -847,6 +886,7 @@ mod tests {
             mouse_tools: Rect::default(),
             mouse_first: 0,
             filtering: true,
+            after: Then::Stay,
         };
         for ch in "copy".chars() {
             menu.handle(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));

@@ -327,6 +327,11 @@ struct Picker {
     mouse_modes_x: u16,
     mouse_paths: Vec<(Rect, PathBuf)>,
     last_click: Option<(PathBuf, u16, u16, std::time::Instant)>,
+    /// What follows an action run from the menu, for actions that do not
+    /// say themselves. Set by --after-action and switched with Ctrl-X.
+    after_action: crate::actions::Then,
+    /// The folder handed to the shell when an action ended the run with cd.
+    after_cd: Option<PathBuf>,
 }
 
 /// A place the search has started from, with what had been typed there.
@@ -415,7 +420,10 @@ pub fn run(args: PickArgs, root: PathBuf, config: Config) -> Result<Option<PathB
         mouse_modes_x: 0,
         mouse_paths: Vec::new(),
         last_click: None,
+        after_action: crate::actions::Then::Stay,
+        after_cd: None,
     };
+    picker.after_action = args.after_action;
     if let Some(reason) = refused {
         picker.set_notice(reason);
     }
@@ -446,7 +454,11 @@ pub fn run(args: PickArgs, root: PathBuf, config: Config) -> Result<Option<PathB
         picker.places_query = std::mem::take(&mut picker.query);
         picker.open_places(args.mode);
     }
-    let result = picker.run_tui();
+    let result = picker.run_tui()?;
+    // An action that ended the run with cd hands over its folder as it is.
+    if let Some(folder) = picker.after_cd.take() {
+        return Ok(Some(folder));
+    }
     // A place chosen from a list is printed as it is, whatever screen the
     // list was over; only a file picked in files hands back its folder.
     let mode = if picker.places.is_some() {
@@ -455,7 +467,7 @@ pub fn run(args: PickArgs, root: PathBuf, config: Config) -> Result<Option<PathB
         picker.mode
     };
     drop(picker);
-    result.map(|entry| entry.map(|e| e.output_path(mode)))
+    Ok(result.map(|e| e.output_path(mode)))
 }
 
 /// The screen a picker opens in, given the one asked for and where. A search
@@ -652,7 +664,7 @@ impl Picker {
             (KeyCode::Char('n'), true) => self.start_naming(),
             (KeyCode::Char('p'), true) => {
                 if let Some(target) = self.selected_path() {
-                    self.menu = Some(crate::action_menu::Menu::new(target));
+                    self.menu = Some(crate::action_menu::Menu::new(target).then(self.after_action));
                 }
             }
             (KeyCode::Char('o'), true) => {
@@ -1321,6 +1333,19 @@ impl Picker {
                             Err(error) => format!("{name}: {error}"),
                         });
                     }
+                    // What follows: the action's own say, else the run's.
+                    match action.then().unwrap_or(self.after_action) {
+                        crate::actions::Then::Stay => {}
+                        crate::actions::Then::Quit => return Ok(None),
+                        crate::actions::Then::Cd => {
+                            // A file's folder, since the shell cds there.
+                            self.after_cd = Some(match target.parent() {
+                                Some(dir) if !target.is_dir() => dir.to_path_buf(),
+                                _ => target.clone(),
+                            });
+                            return Ok(None);
+                        }
+                    }
                 }
                 Action::Accept => {
                     if let Some(mode) = self.places {
@@ -1602,7 +1627,7 @@ impl Picker {
 
     fn right_click(&mut self, target: PathBuf, modifiers: KeyModifiers) {
         if modifiers.contains(KeyModifiers::CONTROL) {
-            self.menu = Some(crate::action_menu::Menu::new(target));
+            self.menu = Some(crate::action_menu::Menu::new(target).then(self.after_action));
             return;
         }
         let result = open::launch(&target);
@@ -1832,7 +1857,10 @@ impl Picker {
             return Action::Continue;
         }
         if let Some(menu) = &mut self.menu {
-            return match menu.handle(key) {
+            let decision = menu.handle(key);
+            // Ctrl-X in the menu sets what follows for the rest of the run.
+            self.after_action = menu.after;
+            return match decision {
                 crate::action_menu::Decision::Stay => Action::Continue,
                 crate::action_menu::Decision::Close => {
                     self.menu = None;
@@ -1932,7 +1960,7 @@ impl Picker {
         match (key.code, ctrl) {
             (KeyCode::Char('p'), true) => {
                 let target = self.selected_path().unwrap_or_else(|| self.root.clone());
-                self.menu = Some(crate::action_menu::Menu::new(target));
+                self.menu = Some(crate::action_menu::Menu::new(target).then(self.after_action));
                 return Action::Continue;
             }
             (KeyCode::Char('n'), true) => {
@@ -3892,6 +3920,8 @@ mod tests {
             mouse_modes_x: 0,
             mouse_paths: Vec::new(),
             last_click: None,
+            after_action: crate::actions::Then::Stay,
+            after_cd: None,
         }
     }
 
@@ -4769,6 +4799,33 @@ mod tests {
         // A local folder opens in the search asked for.
         let local = std::env::current_dir().unwrap();
         assert_eq!(opening_screen(Mode::Dirs, &local), (Mode::Dirs, None));
+    }
+
+    #[test]
+    fn ctrl_x_in_the_menu_sets_what_follows_an_action_for_the_rest_of_the_run() {
+        let root = crate::testing::temp_dir().join(format!("tadoru-then-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("a")).unwrap();
+        let ctrl = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL);
+        let mut picker = test_picker(root.clone(), Mode::Browse);
+        picker.after_action = crate::actions::Then::Quit;
+        picker.handle_key(ctrl('p'));
+        assert!(picker.menu.is_some());
+        assert_eq!(
+            picker.menu.as_ref().unwrap().after,
+            crate::actions::Then::Quit
+        );
+        picker.handle_key(ctrl('x'));
+        picker.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(picker.menu.is_none());
+        assert_eq!(picker.after_action, crate::actions::Then::Stay);
+        // The next menu opens on the switched setting.
+        picker.handle_key(ctrl('p'));
+        assert_eq!(
+            picker.menu.as_ref().unwrap().after,
+            crate::actions::Then::Stay
+        );
+        drop(picker);
+        crate::testing::remove_tree(&root);
     }
 
     #[test]

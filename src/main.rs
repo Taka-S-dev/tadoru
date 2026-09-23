@@ -128,6 +128,13 @@ pub struct PickArgs {
     /// where no shell function is waiting to cd, such as from a launcher.
     #[arg(long, value_name = "ACTION")]
     pub on_accept: Option<String>,
+    /// What follows an action run from the menu: stay on the screen, quit,
+    /// or cd, which quits and prints the folder for the shell to cd into.
+    /// An action with a then of its own in actions.json keeps it, and
+    /// Ctrl-X in the menu switches between stay and quit for the rest of
+    /// the run.
+    #[arg(long, value_enum, default_value_t = actions::Then::Stay, value_name = "WHAT")]
+    pub after_action: actions::Then,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
