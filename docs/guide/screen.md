@@ -152,9 +152,9 @@ there. `popd` comes back to where you were and frees the letter.
 
 ```text
 d → dirs                           ^D
-s → favorites                      ^S
+b → browse                        Tab
+s → Favorites                      ^S
 l → Go into the selection       Right
-a → Actions for the selection      ^P
 ```
 
 Press the letter at the left to run a row; nothing needs holding down with it. The arrow keys and
@@ -177,66 +177,63 @@ key. Ctrl-L does what Right does.
 
 ## Modes and favorites
 
-**Tab** goes between the search and browse. The search is one of dirs, files, recent and favorites,
-and Tab from browse returns to the one used last: after `cf` it goes between files and browse, and
-after `zi` between recent and browse. Looking for something and looking around are what you switch
-between most, so one key joins the two. Browse's key hints name the search Tab goes back to, as in
-`Tab: files`.
+**Tab** goes between the search and browse. The search is dirs or files, and Tab from browse returns
+to the one used last: after `cf` it goes between files and browse. Looking for something and looking
+around are what you switch between most, so one key joins the two. Browse's key hints name the
+search Tab goes back to, as in `Tab: files`.
 
-**Shift-Tab** changes the kind of search, in the order dirs → files → recent → favorites. In browse
-it switches between the columns and the tree instead. Clicking a mode name on the top border goes
-straight to that mode, and so does **Ctrl** with the search's letter: Ctrl-D dirs, Ctrl-F files,
-Ctrl-R recent and Ctrl-S favorites, the starred ones. Shift-Tab only steps forward, so from dirs it
-takes three presses to reach favorites, and Ctrl-S takes one. Browse already has a key of its own in
-Tab. These are Ctrl with a letter rather than Alt with a digit because a terminal may keep the
-second for switching its own tabs. The tabs there are laid out as
-`[dirs|files|recent|favorites]  [browse|tree]`: Shift-Tab steps within a bracket and Tab goes
-across, so the four searches sit apart from browse, which comes as columns or as a
-[tree](#the-tree-view).
+**Shift-Tab** goes between dirs and files, and in browse between the columns and the tree. Clicking
+a mode name on the top border goes straight to that mode, and so does **Ctrl** with the search's
+letter: Ctrl-D dirs, Ctrl-F files. These are Ctrl with a letter rather than Alt with a digit because
+a terminal may keep the second for switching its own tabs. The tabs are laid out as `[dirs|files]
+[browse|tree]`: Shift-Tab steps within a bracket and Tab goes across, so the two searches sit apart
+from browse, which comes as columns or as a [tree](#the-tree-view).
 
 Browse opens the folder being searched, with the item selected in dirs or files still selected. It
 does not go into the selected folder: that would replace the list you had just been reading, and in
 a list nobody has moved, the selection is only the first row, so you would land somewhere you never
-chose. recent and favorites list places other than the folder being searched, so switching to browse
-from them opens the same place whatever was selected.
+chose.
 
 The path row in dirs and files shows the folder the search covers. Click a step of it, or press
-**Left**, to search from there instead. The **◀ ▶ ▲** buttons at the left of that row are in the same
-place as in browse, and in a search they act on the starting point: where Left in browse goes up a
-level, here it widens the search by a level. The filter you typed stays. The search cannot go above
-the top of a drive, and the screen says so. recent and favorites do not scan a folder, so they show
-where their entries come from instead of a path.
+**Left**, to search from there instead. The **◀ ▶ ▲** buttons at the left of that row are in the
+same place as in browse, and in a search they act on the starting point: where Left in browse goes
+up a level, here it widens the search by a level. The filter you typed stays. The search cannot go
+above the top of a drive, and the screen says so.
 
-**Right** goes into the selection without leaving tadoru, where Enter would cd there and quit.
-From dirs and files it opens browse inside the folder; on a file, the folder holding it with the
-file selected. Tab from there goes back to the search, which then starts from that folder.
+**Right** goes into the selection without leaving tadoru, where Enter would cd there and quit. From
+dirs and files it opens browse inside the folder; on a file, the folder holding it with the file
+selected. Tab from there goes back to the search, which then starts from that folder.
 
-Recent and favorites are lists of places to go rather than somewhere to be, so from them Right goes
-back to where you opened them from, now at the place you chose. Looking for something in dirs, open
-favorites, pick one and press Right: the dirs search carries on from that favorite. Opened from
-files it is files. The filter is cleared on the way, since what was typed picked the place out and
-would match nothing inside it; Ctrl+← brings back both it and where the search started. The key
-hints name where Right leads, as in `Right: dirs from it`.
+**Favorites and recent places** are lists of places to go rather than somewhere to be, so they are
+not screens with a tab. **Ctrl-S** (S for the starred ones) opens the favorites and **Ctrl-R** the
+recent places, as a list at the bottom right over whichever screen you are on, the way the action
+menu opens; the same key, Esc or a click outside closes it. Typing filters the list, and Esc clears
+what was typed before it closes. **Enter** cds to the place and quits, as it does everywhere.
+**Right** takes the screen under the list to the place and closes the list: looking for something in
+dirs, open favorites, pick one and press Right, and the dirs search carries on from that favorite,
+with the filter cleared since what was typed picked the place out and would match nothing inside it;
+Ctrl+← brings back both it and where the search started. Over browse, or the tree, the place is
+shown in its folder and selected, the way Tab shows a search result, so Enter then goes to the
+favorite itself rather than to whatever sorts first inside it, and Right again goes into it. A
+favorite whose folder has been deleted stays in the list so it can be unpinned, and the bottom of
+the screen says it is not there.
 
-Opened from browse, Right goes back to browse and shows the place in its folder, selected, the way
-Tab shows a search result. Enter then goes to the favorite itself, rather than to whatever sorts
-first inside it, and Right again goes into it. A picker opened straight into a list, as `zi` does,
-has nowhere to go back to and does the same. A favorite whose folder has been deleted stays where it
-is, and the bottom of the screen says so.
+The keys that act on the selection work in the list too: Ctrl-P opens the action menu for the place,
+Ctrl-O and Ctrl-E open it, and in favorites Ctrl-B unpins and Ctrl-N names. A picker opened straight
+into a list, as `zi` does, has the list over browse of the folder the shell is in, so Esc leaves
+that browse behind. If the history cannot be read, the list shows why, and F5 tries again.
 
-Once opened, browse keeps its folder, selection and filter as you switch modes, and clicking its mode
-name again does not reset them. After the search has moved, though, browse lines up with the new
-starting point, since coming back to an old folder while the search looks elsewhere would look like a
-jump to an unrelated place. F5 refreshes the list and the preview; in browse it keeps the filter and
-the selection where it can. If the history cannot be read, the screen shows why: press F5 to try
-again, or Shift-Tab to go to another list.
+Once opened, browse keeps its folder, selection and filter as you switch modes, and clicking its
+mode name again does not reset them. After the search has moved, though, browse lines up with the
+new starting point, since coming back to an old folder while the search looks elsewhere would look
+like a jump to an unrelated place. F5 refreshes the list and the preview; in browse it keeps the
+filter and the selection where it can.
 
 Press **Ctrl-B** to pin or unpin the selected folder as a favorite. Pinned folders show a yellow
 **★**, even with icons turned off. Changes made from another shell show up after F5. With a file
 selected, its folder is pinned. In files, ★ means the file's folder is a favorite. To go to a
-favorite, press Shift-Tab until you reach **favorites**, or click favorites on the top border, then
-filter and press Enter. zoxide is not needed. Folders that have since been deleted stay in the list,
-so they can still be unpinned with Ctrl-B.
+favorite, press **Ctrl-S**, filter and press Enter. zoxide is not needed. Folders that have since
+been deleted stay in the list, so they can still be unpinned with Ctrl-B.
 
 Favorites can be managed from the command line too. Without a path, the current folder is used.
 

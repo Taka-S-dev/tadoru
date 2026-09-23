@@ -54,9 +54,8 @@ pub struct KeyMenu {
 }
 
 impl KeyMenu {
-    /// `origin` is the mode Right goes back to from recent and favorites,
-    /// which the row for it names. `tree` says browse is drawn as a tree.
-    pub fn new(here: Mode, origin: Mode, tree: bool) -> Self {
+    /// `tree` says browse is drawn as a tree.
+    pub fn new(here: Mode, tree: bool) -> Self {
         let tab = |key, mode: Mode, shortcut| Entry {
             key,
             name: mode.label(),
@@ -74,8 +73,6 @@ impl KeyMenu {
         let entries = vec![
             tab('d', Mode::Dirs, "^D"),
             tab('f', Mode::Files, "^F"),
-            tab('r', Mode::Recent, "^R"),
-            tab('s', Mode::Favorites, "^S"),
             tab('b', Mode::Browse, "Tab"),
             Entry {
                 key: 'v',
@@ -85,17 +82,26 @@ impl KeyMenu {
                 shortcut: if browsing { "S-Tab" } else { "" },
                 command: Command::ToggleTree,
             },
+            // Lists that open over the screen rather than screens of their
+            // own, so they come after the tabs.
+            Entry {
+                key: 's',
+                name: "Favorites",
+                shortcut: "^S",
+                command: Command::Go(Mode::Favorites),
+            },
+            Entry {
+                key: 'r',
+                name: "Recent places",
+                shortcut: "^R",
+                command: Command::Go(Mode::Recent),
+            },
             press(
                 'l',
-                match (here, origin) {
-                    (Mode::Browse, _) if tree => "Open the folder",
-                    (Mode::Browse, _) => "Go down a level",
-                    // A list of places is left for where it was opened from,
-                    // now at the place chosen.
-                    (Mode::Recent | Mode::Favorites, Mode::Dirs) => "Search dirs from it",
-                    (Mode::Recent | Mode::Favorites, Mode::Files) => "Search files from it",
-                    (Mode::Recent | Mode::Favorites, _) => "Show it in browse",
-                    _ => "Go into the selection",
+                match (browsing, tree) {
+                    (true, true) => "Open the folder",
+                    (true, false) => "Go down a level",
+                    (false, _) => "Go into the selection",
                 },
                 "Right",
                 KeyCode::Right,
@@ -134,7 +140,7 @@ impl KeyMenu {
             .unwrap_or(0);
         Self {
             entries,
-            tabs: 6,
+            tabs: 4,
             here,
             selected,
             mouse_rows: Rect::default(),
@@ -276,7 +282,7 @@ mod tests {
 
     #[test]
     fn a_plain_letter_runs_its_row_and_esc_or_ctrl_space_closes() {
-        let mut menu = KeyMenu::new(Mode::Dirs, Mode::Dirs, false);
+        let mut menu = KeyMenu::new(Mode::Dirs, false);
         assert!(matches!(
             menu.handle(key('s')),
             Decision::Run(Command::Go(Mode::Favorites))
@@ -301,15 +307,15 @@ mod tests {
 
     #[test]
     fn it_opens_on_the_current_tab_and_enter_runs_the_selection() {
-        let mut menu = KeyMenu::new(Mode::Recent, Mode::Browse, false);
+        let mut menu = KeyMenu::new(Mode::Files, false);
         assert!(matches!(
             menu.handle(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
-            Decision::Run(Command::Go(Mode::Recent))
+            Decision::Run(Command::Go(Mode::Files))
         ));
         menu.handle(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
         assert!(matches!(
             menu.handle(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
-            Decision::Run(Command::Go(Mode::Favorites))
+            Decision::Run(Command::Go(Mode::Browse))
         ));
         // Every key is its own, or a letter would run the wrong row.
         let mut keys: Vec<char> = menu.entries.iter().map(|entry| entry.key).collect();
@@ -320,7 +326,7 @@ mod tests {
 
     #[test]
     fn rows_name_the_shortcut_and_clicks_land_on_the_right_row() {
-        let mut menu = KeyMenu::new(Mode::Browse, Mode::Browse, false);
+        let mut menu = KeyMenu::new(Mode::Browse, false);
         let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
         terminal
             .draw(|frame| menu.render(frame.area(), frame))
@@ -335,20 +341,20 @@ mod tests {
         assert!(text(rows.y).starts_with("  d → dirs"), "{}", text(rows.y));
         assert!(text(rows.y).trim_end().ends_with("^D"));
         // Opened from browse, the two moves are named for what they do there.
-        assert!(text(rows.y + 5).contains("v → Tree view"));
+        // The lists of places come after the rule, since they are not tabs.
+        assert!(text(rows.y + 3).contains("v → Tree view"));
+        assert!(text(rows.y + 4).starts_with("─"));
+        assert!(text(rows.y + 5).contains("s → Favorites"));
         assert!(text(rows.y + 7).contains("l → Go down a level"));
-        assert!(text(rows.y + 6).starts_with("─"));
-        // From favorites the same row says where Right goes back to.
-        let names = |here, origin| -> Vec<&str> {
-            KeyMenu::new(here, origin, false)
+        let names = |here, tree| -> Vec<&str> {
+            KeyMenu::new(here, tree)
                 .entries
                 .iter()
                 .map(|entry| entry.name)
                 .collect()
         };
-        assert!(names(Mode::Favorites, Mode::Files).contains(&"Search files from it"));
-        assert!(names(Mode::Favorites, Mode::Browse).contains(&"Show it in browse"));
-        assert!(names(Mode::Dirs, Mode::Dirs).contains(&"Go into the selection"));
+        assert!(names(Mode::Browse, true).contains(&"Open the folder"));
+        assert!(names(Mode::Dirs, false).contains(&"Go into the selection"));
 
         let click = |row: u16, column: u16| MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
@@ -362,7 +368,7 @@ mod tests {
             Some(KeyCode::Enter)
         );
         assert_eq!(menu.entries[menu.selected].key, 'l');
-        assert_eq!(menu.handle_mouse(click(rows.y + 6, rows.x + 3)), None);
+        assert_eq!(menu.handle_mouse(click(rows.y + 4, rows.x + 3)), None);
         // A click outside the panel closes it.
         assert_eq!(menu.handle_mouse(click(0, 0)), Some(KeyCode::Esc));
     }

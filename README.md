@@ -87,9 +87,10 @@ chosen folder instead: `tadoru pick --on-accept "Open shell here"` starts a shel
 ![Tab browses the folder in columns, Shift-Tab draws it as a tree, typing there searches everything below, and Right opens the tree down to the match](docs/images/screen.gif)
 
 Tab goes between the search and browse. Browse goes back to the search used last, so after
-`cf` Tab goes between files and browse. Shift-Tab changes the kind of search:
-dirs → files → recent → favorites, and in browse it switches between the columns and a tree.
-The mode names on the top border also switch with a click.
+`cf` Tab goes between files and browse. Shift-Tab goes between dirs and files, and in browse
+between the columns and a tree. The mode names on the top border also switch with a click.
+Favorites and recent places are not screens but lists that open over whichever screen you are on:
+Ctrl-S and Ctrl-R open them, Enter cds to the place, Right takes the screen there, and Esc closes.
 In every mode, typing filters the list and Enter cds there. The letters match in order with gaps;
 `'word` asks for them side by side, as in fzf ([what typing matches](docs/guide/screen.md#what-typing-matches)).
 Esc clears the filter, and pressed again on an empty filter it quits. Ctrl-C always quits.
@@ -98,15 +99,16 @@ Esc clears the filter, and pressed again on an empty filter it quits. Ctrl-C alw
 |---|---|
 | Ctrl-Space | Open the list of keys. A plain letter there runs one, such as `s` for favorites; Esc closes it |
 | Tab | Go between the search and browse, back to the search used last |
-| Shift-Tab | Change to the next kind of search. In browse, switch between the columns and a tree whose folders open in place and where typing searches everything below |
-| Ctrl-D / Ctrl-F / Ctrl-R / Ctrl-S | Go straight to dirs, files, recent or favorites (S for starred) |
+| Shift-Tab | Go between dirs and files. In browse, switch between the columns and a tree whose folders open in place and where typing searches everything below |
+| Ctrl-D / Ctrl-F | Go straight to dirs or files |
+| Ctrl-S / Ctrl-R | Open the favorites (S for starred) or the recent places over the screen. Typing filters them; Enter cds there, Right takes the screen there and keeps going, Esc closes |
 | Ctrl-B | Pin or unpin the selected folder as a favorite |
 | Ctrl-N | Name the selected folder's favorite, for `c @name`; an empty name takes the name away |
 | Ctrl-P | Open the action menu for the selected item |
 | Ctrl-A | When a scan stopped at its limit, collect the rest |
 | F5 | Refresh the list and the preview |
 | Left | Widen the search by one level. In browse, go up a level; on Windows, from the top of a drive to the list of drives |
-| Right | Go into the selection and keep going. From dirs and files it opens browse there; from favorites and recent it goes back to where you opened them from, now at that place. In browse, go down a level |
+| Right | Go into the selection and keep going. From dirs and files it opens browse there. In browse, go down a level. In a list of places, take the screen to the place: a search starts from it, browse shows it selected |
 | Ctrl+← / Ctrl+→ | Step back or forward through the places visited: folders in browse, starting points in a search. Alt+← / Alt+→ do the same, and Ctrl-T goes back as after a tag jump in Vim |
 
 The path under the top border is the folder the search covers. Click a step of it to search from

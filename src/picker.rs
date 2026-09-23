@@ -311,9 +311,12 @@ struct Picker {
     naming: Option<(PathBuf, String)>,
     /// The panel of keys that Ctrl-Space opens.
     keys: Option<crate::key_menu::KeyMenu>,
-    /// The last mode that shows a place: dirs, files or browse. Recent and
-    /// favorites list places to go, and Right in them goes back here.
-    origin: Mode,
+    /// The list of places open over the screen, recent or favorites, and
+    /// what is typed into it. Its source is the one kept for that mode.
+    places: Option<Mode>,
+    places_query: String,
+    /// The rows of the list of places, for clicks and the wheel.
+    mouse_places: (Rect, usize, usize),
     mouse_rows: (Rect, usize, usize),
     mouse_header: Rect,
     /// Clickable areas of the navigation buttons, empty outside browse mode.
@@ -401,7 +404,9 @@ pub fn run(args: PickArgs, root: PathBuf, config: Config) -> Result<Option<PathB
         found_marks: HashMap::new(),
         tree_rows: 20,
         tree_dirs: HashMap::new(),
-        origin: place_mode(args.mode),
+        places: None,
+        places_query: String::new(),
+        mouse_places: (Rect::default(), 0, 0),
         mouse_rows: (Rect::default(), 0, 0),
         mouse_header: Rect::default(),
         mouse_nav: Vec::new(),
@@ -429,8 +434,22 @@ pub fn run(args: PickArgs, root: PathBuf, config: Config) -> Result<Option<PathB
         }
     }
 
+    // Opened into a list of places, as zi is, the list floats over browse of
+    // the folder the shell is in, and Esc leaves that browse behind.
+    if matches!(args.mode, Mode::Recent | Mode::Favorites) {
+        picker.mode = Mode::Browse;
+        picker.browser = Some(Browser::new(picker.root.clone()));
+        picker.places_query = std::mem::take(&mut picker.query);
+        picker.open_places(args.mode);
+    }
     let result = picker.run_tui();
-    let mode = picker.mode;
+    // A place chosen from a list is printed as it is, whatever screen the
+    // list was over; only a file picked in files hands back its folder.
+    let mode = if picker.places.is_some() {
+        Mode::Browse
+    } else {
+        picker.mode
+    };
     drop(picker);
     result.map(|entry| entry.map(|e| e.output_path(mode)))
 }
@@ -448,50 +467,243 @@ fn is_erase(key: &KeyEvent) -> bool {
         || (key.code == KeyCode::Char('h') && key.modifiers.contains(KeyModifiers::CONTROL))
 }
 
-/// Where Right leads from a picker opened in `mode`. Opened straight into recent
-/// or favorites there is nowhere to go back to, so the place is browsed.
-fn place_mode(mode: Mode) -> Mode {
-    match mode {
-        Mode::Recent | Mode::Favorites => Mode::Browse,
-        place => place,
-    }
-}
-
-/// The search a picker opened in `mode` goes back to from browse. One opened
-/// straight into browse has not searched yet, so it gets the directory search.
+/// The search a picker opened in `mode` goes back to from browse. Opened
+/// into browse or a list of places it has not searched yet, so it gets the
+/// directory search.
 fn first_search(mode: Mode) -> Mode {
-    if mode == Mode::Browse {
-        Mode::Dirs
+    if mode == Mode::Files {
+        Mode::Files
     } else {
-        mode
+        Mode::Dirs
     }
 }
 
-/// The search after `mode` in tab order, for Shift-Tab. Browse is where Tab
-/// goes rather than another kind of search, so it is passed over.
+/// The other search, for Shift-Tab: dirs and files take turns. Browse is
+/// where Tab leads, and recent and favorites are lists over the screen.
 fn next_search(mode: Mode) -> Mode {
-    let start = mode_index(mode);
-    (1..MODE_ORDER.len())
-        .map(|step| MODE_ORDER[(start + step) % MODE_ORDER.len()])
-        .find(|&m| m != Mode::Browse)
-        .expect("a search mode")
+    if mode == Mode::Dirs {
+        Mode::Files
+    } else {
+        Mode::Dirs
+    }
 }
 
 impl Picker {
     /// The current mode's source, started on first use.
     fn source(&mut self) -> &mut Source {
-        let idx = mode_index(self.mode);
+        self.source_for(self.mode)
+    }
+
+    /// The source of `mode`, started on first use. A list of places filters
+    /// on what is typed into it, the searches on the prompt.
+    fn source_for(&mut self, mode: Mode) -> &mut Source {
+        let idx = mode_index(mode);
         if self.sources[idx].is_none() {
             let limit = if self.unlimited {
                 0
             } else {
                 self.config.scan_limit
             };
-            let mut source = Source::start(self.mode, &self.root, &self.config, limit);
-            source.set_query(&self.query, false);
+            let mut source = Source::start(mode, &self.root, &self.config, limit);
+            let query = if matches!(mode, Mode::Recent | Mode::Favorites) {
+                &self.places_query
+            } else {
+                &self.query
+            };
+            source.set_query(query, false);
             self.sources[idx] = Some(source);
         }
         self.sources[idx].as_mut().expect("just created")
+    }
+
+    /// Opens the list of recent places or favorites over the screen, or
+    /// closes it when it is the one open. Favorites are read again each
+    /// time, since another shell may have pinned something meanwhile.
+    fn open_places(&mut self, mode: Mode) {
+        if self.places == Some(mode) {
+            self.places = None;
+            return;
+        }
+        self.places_query.clear();
+        self.restart_places(mode);
+        self.places = Some(mode);
+    }
+
+    fn restart_places(&mut self, mode: Mode) {
+        if mode == Mode::Favorites {
+            self.reload_pinned();
+        }
+        if let Some(stale) = self.sources[mode_index(mode)].take() {
+            stale.retire();
+        }
+        self.source_for(mode);
+    }
+
+    fn set_places_query(&mut self, query: &str) {
+        let Some(mode) = self.places else {
+            return;
+        };
+        let append = query.starts_with(&self.places_query);
+        self.places_query = query.to_string();
+        self.source_for(mode).set_query(query, append);
+    }
+
+    /// A place chosen from the list, to go on from: a search starts from it,
+    /// and browse shows it in its folder, selected, as Tab shows a search
+    /// result, rather than stepping inside where the highlight would be on
+    /// a first row nobody chose.
+    fn go_to_place(&mut self, path: &Path) {
+        self.places = None;
+        if self.mode == Mode::Browse {
+            self.browser().reveal(path);
+            if self.tree_view {
+                self.tree().reveal(path);
+            }
+            self.preview = None;
+            return;
+        }
+        let search = self.mode;
+        self.browse_at(path);
+        self.switch_to(search);
+        self.set_query("");
+    }
+
+    /// Keys while a list of places is open. It takes the keys a search
+    /// takes, and Enter, Right and the actions work on the place selected.
+    fn handle_places_key(&mut self, key: KeyEvent) -> Action {
+        let Some(mode) = self.places else {
+            return Action::Continue;
+        };
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        match (key.code, ctrl) {
+            (KeyCode::Esc, _) => {
+                if self.places_query.is_empty() {
+                    self.places = None;
+                } else {
+                    self.set_places_query("");
+                }
+            }
+            (KeyCode::Char('c'), true) => return Action::Cancel,
+            // The key that opened the list closes it; the other one swaps.
+            (KeyCode::Char('r'), true) => self.open_places(Mode::Recent),
+            (KeyCode::Char('s'), true) => self.open_places(Mode::Favorites),
+            (KeyCode::Char('d' | 'f'), true) | (KeyCode::Tab, _) | (KeyCode::BackTab, _) => {
+                self.places = None;
+                return self.handle_key(key);
+            }
+            (KeyCode::Enter, _) => return Action::Accept,
+            (KeyCode::Right, _) | (KeyCode::Char('l'), true) => match self.selected_path() {
+                // Favorites keeps folders that have been deleted, so they
+                // can be unpinned, and there is nowhere to go for one.
+                Some(path) if !path.exists() => {
+                    self.set_notice(format!("Not there any more: {}", path.display()));
+                }
+                Some(path) => self.go_to_place(&path),
+                None => {}
+            },
+            (KeyCode::Up, _) | (KeyCode::Char('k'), true) => {
+                let s = self.source_for(mode);
+                s.selected = s.selected.saturating_sub(1);
+            }
+            (KeyCode::Down, _) | (KeyCode::Char('j'), true) => {
+                let s = self.source_for(mode);
+                s.selected = s.selected.saturating_add(1);
+            }
+            (KeyCode::PageUp, _) => {
+                let s = self.source_for(mode);
+                s.selected = s.selected.saturating_sub(10);
+            }
+            (KeyCode::PageDown, _) => {
+                let s = self.source_for(mode);
+                s.selected = s.selected.saturating_add(10);
+            }
+            (KeyCode::Backspace, _) | (KeyCode::Char('h'), true) => {
+                let mut query = self.places_query.clone();
+                query.pop();
+                self.set_places_query(&query);
+            }
+            (KeyCode::Char('u'), true) => self.set_places_query(""),
+            (KeyCode::F(5), _) => self.restart_places(mode),
+            (KeyCode::Char('b'), true) => self.toggle_pin(),
+            (KeyCode::Char('n'), true) => self.start_naming(),
+            (KeyCode::Char('p'), true) => {
+                if let Some(target) = self.selected_path() {
+                    self.menu = Some(crate::action_menu::Menu::new(target));
+                }
+            }
+            (KeyCode::Char('o'), true) => {
+                if let Some(path) = self.selected_path() {
+                    self.report_open(&path, open::launch(&path));
+                }
+            }
+            (KeyCode::Char('e'), true) => {
+                if let Some(path) = self.selected_path() {
+                    self.report_open(&path, open::reveal(&path));
+                }
+            }
+            (KeyCode::Char(c), false) if crate::keys::is_typed_text(&key) => {
+                let mut query = self.places_query.clone();
+                query.push(c);
+                self.set_places_query(&query);
+            }
+            _ => {}
+        }
+        Action::Continue
+    }
+
+    /// Pins or unpins the folder Ctrl-B is pressed on, and says which.
+    fn toggle_pin(&mut self) {
+        let target = self.pin_target();
+        let message = match target {
+            None => "Nothing selected. Switch to browse to pin this folder.".into(),
+            Some(path) => match crate::favorites::path().and_then(|file| {
+                let added = crate::favorites::update(&file, &path, None)?;
+                crate::favorites::Index::read(&file).map(|index| (added, index))
+            }) {
+                Ok((added, index)) => {
+                    self.pinned = index;
+                    self.refresh_favorites_list();
+                    format!(
+                        "{}: {}",
+                        if added { "Pinned" } else { "Unpinned" },
+                        path.display()
+                    )
+                }
+                Err(error) => format!("Cannot update favorites: {error}"),
+            },
+        };
+        self.set_notice(message);
+    }
+
+    /// The list of favorites reads the file again next time it is shown,
+    /// and straight away while it is open.
+    fn refresh_favorites_list(&mut self) {
+        self.sources[mode_index(Mode::Favorites)] = None;
+        if self.places == Some(Mode::Favorites) {
+            self.source_for(Mode::Favorites);
+        }
+    }
+
+    /// Opens the name prompt on the folder Ctrl-N is pressed on, with the
+    /// name it has, so a name can be changed as well as given.
+    fn start_naming(&mut self) {
+        match self.pin_target() {
+            None => {
+                self.set_notice("Nothing selected. Switch to browse to name this folder.".into())
+            }
+            Some(path) => {
+                let current = crate::favorites::path()
+                    .and_then(|file| crate::favorites::read(&file))
+                    .ok()
+                    .and_then(|all| {
+                        all.into_iter()
+                            .find(|f| f.path == path)
+                            .and_then(|f| f.name)
+                    })
+                    .unwrap_or_default();
+                self.naming = Some((path, current));
+            }
+        }
     }
 
     fn set_query(&mut self, query: &str) {
@@ -805,32 +1017,9 @@ impl Picker {
         self.preview = None;
     }
 
-    /// Right on a search result. From dirs and files that is a look inside, in
-    /// browse. Recent and favorites are lists of places to go rather than
-    /// somewhere to be, so from them it goes back to the mode they were opened
-    /// from, now at the place chosen: a search that was under way carries on
-    /// from the favorite.
-    ///
-    /// Going back to browse, the place is shown in its folder and selected,
-    /// as Tab shows a search result, rather than stepped into. Inside it the
-    /// highlight would be on the first row, which nobody chose, and Enter
-    /// would cd there instead of to the favorite.
+    /// Right on a search result: a look inside, in browse.
     fn go_into(&mut self, path: &Path) {
-        let listed = matches!(self.mode, Mode::Recent | Mode::Favorites);
-        let origin = self.origin;
-        if listed && origin == Mode::Browse {
-            self.mode = Mode::Browse;
-            self.browser().reveal(path);
-            self.preview = None;
-            return;
-        }
         self.browse_at(path);
-        if listed {
-            self.switch_to(origin);
-            // What was typed picked the place out and would match nothing
-            // inside it. Going back brings it back with where it belonged.
-            self.set_query("");
-        }
     }
 
     /// Moves the scan root, remembering where the search came from.
@@ -917,15 +1106,16 @@ impl Picker {
     /// First entry into browse uses the search selection; subsequent mode
     /// switches restore the existing browser, including its filter and selection.
     fn switch_to(&mut self, entering: Mode) {
+        if matches!(entering, Mode::Recent | Mode::Favorites) {
+            self.open_places(entering);
+            return;
+        }
         let leaving = self.mode;
         if entering == leaving {
             return;
         }
         if entering != Mode::Browse {
             self.search_mode = entering;
-        }
-        if !matches!(leaving, Mode::Recent | Mode::Favorites) {
-            self.origin = leaving;
         }
 
         if leaving == Mode::Browse {
@@ -951,12 +1141,6 @@ impl Picker {
             self.browser_root = self.root.clone();
         }
         self.mode = entering;
-        if entering == Mode::Favorites {
-            self.reload_pinned();
-            if let Some(stale) = self.sources[mode_index(Mode::Favorites)].take() {
-                stale.retire();
-            }
-        }
         // Lined up again whenever the search has moved since browse last saw
         // it, which is the only time keeping the old place is a surprise.
         if entering == Mode::Browse && (self.browser.is_none() || self.browser_root != self.root) {
@@ -995,6 +1179,14 @@ impl Picker {
                 source.clamp_selection();
                 // While the list is still filling the count and the spinner
                 // move on their own.
+                dirty |= just_finished || status.changed || status.running || busy;
+            }
+            if let Some(mode) = self.places {
+                let source = self.source_for(mode);
+                let just_finished = source.collect_scan_result();
+                let busy = !source.scan_done.load(Ordering::Acquire);
+                let status = source.matcher.tick(if busy { TICK_MS } else { 0 });
+                source.clamp_selection();
                 dirty |= just_finished || status.changed || status.running || busy;
             }
             if self.in_tree() {
@@ -1107,6 +1299,12 @@ impl Picker {
                     }
                 }
                 Action::Accept => {
+                    if let Some(mode) = self.places {
+                        if let Some(entry) = self.source_for(mode).selected_entry() {
+                            return Ok(Some(entry));
+                        }
+                        continue;
+                    }
                     if self.mode == Mode::Browse {
                         let target = if self.tree_view {
                             self.shown_tree().target()
@@ -1131,6 +1329,9 @@ impl Picker {
     /// The file or directory under the cursor, as is (files mode gives the
     /// file, not its parent). Browse mode falls back to the directory shown.
     fn selected_path(&mut self) -> Option<PathBuf> {
+        if let Some(mode) = self.places {
+            return self.source_for(mode).selected_entry().map(|e| e.path());
+        }
         if self.in_tree() {
             return self.shown_tree().selected_path();
         }
@@ -1154,6 +1355,33 @@ impl Picker {
             return;
         }
         let position = (mouse.column, mouse.row).into();
+        // With a list of places open, a click on a row selects it, the wheel
+        // moves through it, and a click anywhere else closes it.
+        if let Some(mode) = self.places {
+            let (rows, first, count) = self.mouse_places;
+            let next = match mouse.kind {
+                MouseEventKind::Down(MouseButton::Left) if rows.contains(position) => {
+                    let row = first + (mouse.row - rows.y) as usize;
+                    if row >= count {
+                        return;
+                    }
+                    row
+                }
+                MouseEventKind::Down(_) => {
+                    self.places = None;
+                    return;
+                }
+                MouseEventKind::ScrollUp => {
+                    self.source_for(mode).selected.saturating_sub(3) as usize
+                }
+                MouseEventKind::ScrollDown => (self.source_for(mode).selected.saturating_add(3)
+                    as usize)
+                    .min(count.saturating_sub(1)),
+                _ => return,
+            };
+            self.source_for(mode).selected = next as u32;
+            return;
+        }
         if !matches!(
             mouse.kind,
             MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Up(MouseButton::Left)
@@ -1394,6 +1622,9 @@ impl Picker {
     /// The folder Ctrl-B pins and Ctrl-N names: the selected folder, or the
     /// folder holding the selected file. None on the list of drives.
     fn pin_target(&mut self) -> Option<PathBuf> {
+        if let Some(mode) = self.places {
+            return self.source_for(mode).selected_entry().map(|e| e.path());
+        }
         if self.in_tree() {
             Some(self.shown_tree().target()).filter(|path| !path.as_os_str().is_empty())
         } else if self.mode == Mode::Browse {
@@ -1574,15 +1805,14 @@ impl Picker {
         if !is_erase(&key) {
             self.end_erase();
         }
+        if self.places.is_some() {
+            return self.handle_places_key(key);
+        }
         // Some terminals send Ctrl-Space as a bare NUL.
         if key.code == KeyCode::Null
             || (key.code == KeyCode::Char(' ') && key.modifiers == KeyModifiers::CONTROL)
         {
-            self.keys = Some(crate::key_menu::KeyMenu::new(
-                self.mode,
-                self.origin,
-                self.in_tree(),
-            ));
+            self.keys = Some(crate::key_menu::KeyMenu::new(self.mode, self.in_tree()));
             return Action::Continue;
         }
         // Ctrl does the same as Alt here. Terminals that use Alt with the
@@ -1635,48 +1865,11 @@ impl Picker {
                 return Action::Continue;
             }
             (KeyCode::Char('n'), true) => {
-                match self.pin_target() {
-                    None => self.set_notice(
-                        "Nothing selected. Switch to browse to name this folder.".into(),
-                    ),
-                    Some(path) => {
-                        // Opens on the name it has, so a name can be changed
-                        // as well as given.
-                        let current = crate::favorites::path()
-                            .and_then(|file| crate::favorites::read(&file))
-                            .ok()
-                            .and_then(|all| {
-                                all.into_iter()
-                                    .find(|f| f.path == path)
-                                    .and_then(|f| f.name)
-                            })
-                            .unwrap_or_default();
-                        self.naming = Some((path, current));
-                    }
-                }
+                self.start_naming();
                 return Action::Continue;
             }
             (KeyCode::Char('b'), true) => {
-                let target = self.pin_target();
-                let message = match target {
-                    None => "Nothing selected. Switch to browse to pin this folder.".into(),
-                    Some(path) => match crate::favorites::path().and_then(|file| {
-                        let added = crate::favorites::update(&file, &path, None)?;
-                        crate::favorites::Index::read(&file).map(|index| (added, index))
-                    }) {
-                        Ok((added, index)) => {
-                            self.pinned = index;
-                            self.sources[mode_index(Mode::Favorites)] = None;
-                            format!(
-                                "{}: {}",
-                                if added { "Pinned" } else { "Unpinned" },
-                                path.display()
-                            )
-                        }
-                        Err(error) => format!("Cannot update favorites: {error}"),
-                    },
-                };
-                self.set_notice(message);
+                self.toggle_pin();
                 return Action::Continue;
             }
             (KeyCode::F(5), _) => {
@@ -1857,6 +2050,9 @@ impl Picker {
     /// about to run on can still be seen.
     fn render(&mut self, area: Rect, frame: &mut ratatui::Frame) {
         self.render_screen(area, frame);
+        if let Some(mode) = self.places {
+            self.render_places(mode, area, frame);
+        }
         if let Some(menu) = &mut self.menu {
             menu.render(area, frame);
         }
@@ -1938,36 +2134,18 @@ impl Picker {
         let scanning = !source.scan_done.load(Ordering::Acquire);
         let truncated = source.truncated.load(Ordering::Acquire);
 
-        let hints: Vec<String> = {
-            let mut hints = vec![
-                "Tab: browse".to_string(),
-                "^Space: keys".to_string(),
-                format!("S-Tab: {}", next_search(mode).label()),
-                "Enter: cd".to_string(),
-                // Named by where it leads, which from a list of
-                // places is wherever that list was opened from.
-                match (mode, self.origin) {
-                    (Mode::Recent | Mode::Favorites, Mode::Dirs | Mode::Files) => {
-                        format!("Right: {} from it", self.origin.label())
-                    }
-                    _ => "Right: browse it".to_string(),
-                },
-            ];
-            // The list of favorites is where they are kept, so
-            // the keys that change them come before the rest,
-            // which a narrow terminal cuts off.
-            if mode == Mode::Favorites {
-                hints.push("^N: name".to_string());
-                hints.push("^B: unpin".to_string());
-            }
-            hints.extend(
-                ["Esc: clear/exit", "^P: actions", "^B: pin", "F5: refresh"]
-                    .into_iter()
-                    .filter(|hint| mode != Mode::Favorites || *hint != "^B: pin")
-                    .map(str::to_string),
-            );
-            hints
-        };
+        let hints: Vec<String> = vec![
+            "Tab: browse".to_string(),
+            "^Space: keys".to_string(),
+            format!("S-Tab: {}", next_search(mode).label()),
+            "Enter: cd".to_string(),
+            "Right: browse it".to_string(),
+            "^S: favorites".to_string(),
+            "Esc: clear/exit".to_string(),
+            "^P: actions".to_string(),
+            "^B: pin".to_string(),
+            "F5: refresh".to_string(),
+        ];
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
@@ -2043,16 +2221,9 @@ impl Picker {
             width: header_area.width.saturating_sub(after - header_area.x),
             ..header_area
         };
-        let (spans, crumbs) = match mode {
-            Mode::Recent => (vec![Span::styled("zoxide", theme::HEADER)], Vec::new()),
-            Mode::Favorites => (
-                vec![Span::styled("pinned directories", theme::HEADER)],
-                Vec::new(),
-            ),
-            // The path a scan started from is also the way out of it: clicking
-            // a step above the current one searches from there instead.
-            _ => search_location(&root, rest),
-        };
+        // The path a scan started from is also the way out of it: clicking
+        // a step above the current one searches from there instead.
+        let (spans, crumbs) = search_location(&root, rest);
         header.extend(spans);
         self.mouse_crumbs = crumbs;
         frame.render_widget(Paragraph::new(Line::from(header)), header_area);
@@ -2060,7 +2231,7 @@ impl Picker {
         if let Some(error) = &source.scan_error {
             frame.render_widget(
                 Paragraph::new(format!(
-                    "Cannot load {}: {error}\nTab: browse  F5: retry  Shift-Tab: other list  Esc: cancel",
+                    "Cannot load {}: {error}\nTab: browse  F5: retry  Esc: cancel",
                     mode.label()
                 ))
                 .style(Style::default().fg(Color::Red))
@@ -2069,22 +2240,6 @@ impl Picker {
             );
             return;
         }
-        if mode == Mode::Recent && !scanning && total == 0 {
-            frame.render_widget(
-                Paragraph::new("No history yet. F5: refresh  Shift-Tab: other list"),
-                rows_area,
-            );
-        }
-        if mode == Mode::Favorites && !scanning && total == 0 {
-            frame.render_widget(
-                Paragraph::new(
-                    "No favorites yet. Ctrl-B: pin a folder in another mode. Shift-Tab: other list",
-                )
-                .wrap(Wrap { trim: false }),
-                rows_area,
-            );
-        }
-
         let height = rows_area.height as u32;
         if height == 0 || count == 0 {
             return;
@@ -2638,6 +2793,131 @@ impl Picker {
         }
     }
 
+    /// The list of recent places or favorites, floating at the bottom right
+    /// as the other panels do, with a prompt of its own.
+    fn render_places(&mut self, mode: Mode, area: Rect, frame: &mut ratatui::Frame) {
+        self.source_for(mode);
+        let query = self.places_query.clone();
+        let icons = self.config.icons;
+        let source = self.sources[mode_index(mode)].as_mut().expect("started");
+        let snapshot = source.matcher.snapshot();
+        let count = snapshot.matched_item_count();
+        let total = snapshot.item_count();
+        let scanning = !source.scan_done.load(Ordering::Acquire);
+        // Nearly the whole width: the rows are paths, and the end of a path
+        // is what tells places apart. The screen under it still shows its
+        // prompt and where it is, which is all the list needs of it.
+        let width = (area.width * 9 / 10).clamp(40.min(area.width), area.width.saturating_sub(4));
+        // Tall enough for what there is, up to two fifths of the screen, and
+        // never so short that an empty list has no room for its message.
+        let rows = (count.max(1) as u16).min(area.height * 2 / 5).max(3);
+        let height = rows + 4;
+        let (title, footer) = match mode {
+            Mode::Favorites => (
+                " Favorites ",
+                " Enter: cd  Right: go  ^B: unpin  ^N: name  Esc ",
+            ),
+            _ => (" Recent ", " Enter: cd  Right: go  ^B: pin  Esc "),
+        };
+        let panel = crate::action_menu::float(area, width, height);
+        let inner = crate::action_menu::open_panel(panel, frame, title, footer);
+        let [prompt_area, info_area, rows_area] = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(0),
+        ])
+        .areas(inner);
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled("> ", theme::PROMPT),
+                Span::raw(query.clone()),
+            ])),
+            prompt_area,
+        );
+        frame.set_cursor_position((
+            prompt_area.x + 2 + query.chars().count() as u16,
+            prompt_area.y,
+        ));
+        let counts = format!(" {count}/{total} ");
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(counts.clone(), theme::INFO),
+                Span::styled(
+                    "─".repeat((info_area.width as usize).saturating_sub(counts.width())),
+                    theme::BORDER,
+                ),
+            ])),
+            info_area,
+        );
+        self.mouse_places = (rows_area, 0, 0);
+        if let Some(error) = &source.scan_error {
+            frame.render_widget(
+                Paragraph::new(format!("{error}\nF5: retry"))
+                    .style(Style::default().fg(Color::Red))
+                    .wrap(Wrap { trim: false }),
+                rows_area,
+            );
+            return;
+        }
+        if !scanning && total == 0 {
+            let text = match mode {
+                Mode::Favorites => {
+                    "No favorites yet. Close this and press Ctrl-B on a folder to pin it."
+                }
+                _ => "No history yet.",
+            };
+            frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), rows_area);
+            return;
+        }
+        let height = rows_area.height as u32;
+        if height == 0 || count == 0 {
+            return;
+        }
+        let selected = source.selected;
+        source.first = scroll_window(
+            source.first,
+            selected as usize,
+            count as usize,
+            height as usize,
+        );
+        let first = source.first as u32;
+        let last = (first + height).min(count);
+        self.mouse_places = (rows_area, first as usize, count as usize);
+        let pattern = snapshot.pattern().column_pattern(0);
+        let mut indices = Vec::new();
+        let items: Vec<ListItem> = (first..last)
+            .filter_map(|idx| snapshot.get_matched_item(idx).map(|item| (idx, item)))
+            .map(|(idx, item)| {
+                indices.clear();
+                pattern.indices(
+                    item.matcher_columns[0].slice(..),
+                    &mut self.highlighter,
+                    &mut indices,
+                );
+                indices.sort_unstable();
+                indices.dedup();
+                let current = idx == selected;
+                let marks = RowMarks {
+                    icons,
+                    favorite: self.pinned.contains(&item.data.path()),
+                    inside: false,
+                };
+                let icon = marks.prefix(&item.data.display, true);
+                let room = (rows_area.width as usize).saturating_sub(2 + icon.width());
+                let (shown, hits) = keep_the_end(&item.data.display, &indices, room);
+                let mut line = highlight_line(current, &shown, &hits);
+                if !icon.is_empty() {
+                    line.spans.insert(1, icons::span(icon));
+                }
+                if current {
+                    line = line.style(theme::CURRENT);
+                }
+                ListItem::new(line)
+            })
+            .collect();
+        frame.render_widget(List::new(items), rows_area);
+    }
+
     /// Lists the directory the current selection would cd into.
     fn render_preview(&mut self, area: Rect, frame: &mut ratatui::Frame, dir: Option<&Path>) {
         let title = match dir {
@@ -3013,6 +3293,7 @@ type Tab = (Mode, bool);
 fn tabs() -> Vec<Tab> {
     MODE_ORDER
         .iter()
+        .filter(|m| !matches!(m, Mode::Recent | Mode::Favorites))
         .map(|&m| (m, false))
         .chain([(Mode::Browse, true)])
         .collect()
@@ -3024,9 +3305,9 @@ fn tab_label((mode, tree): Tab) -> &'static str {
 
 /// What is drawn before a tab's label, after the one before it.
 ///
-/// The four searches share a bracket and browse has its own: Shift-Tab steps
-/// through the searches and Tab goes across to browse, and six tabs in one
-/// row read as six of the same kind.
+/// The two searches share a bracket and browse has its own: Shift-Tab steps
+/// within a bracket and Tab goes across, and four tabs in one row would read
+/// as four of the same kind.
 fn tab_separator(tab: Tab) -> &'static str {
     if tab == (Mode::Browse, false) {
         "]  ["
@@ -3052,8 +3333,9 @@ fn tab_offsets() -> Vec<(Tab, u16, u16)> {
     offsets
 }
 
-/// The tabs, `[dirs|files|recent|favorites]  [browse|tree]`, drawn on the top
-/// border with the one shown underlined.
+/// The tabs, `[dirs|files]  [browse|tree]`, drawn on the top border with the
+/// one shown underlined. Recent and favorites are not screens but lists that
+/// open over one, so they have no tab.
 fn mode_tabs(shown: Tab) -> Vec<Span<'static>> {
     let mut header: Vec<Span> = vec![Span::styled("[", theme::HEADER)];
     for (i, tab) in tabs().into_iter().enumerate() {
@@ -3172,6 +3454,53 @@ fn match_spans(text: &str, indices: &[u32]) -> Vec<Span<'static>> {
         spans.push(Span::styled(text[run_start..].to_string(), style));
     }
     spans
+}
+
+/// `text` cut to `width` columns from the front, since the end of a path is
+/// what tells places apart, with `hits` (sorted char positions) moved to
+/// match. A favorite's name, the `@name` before the two spaces, is kept
+/// whole and the path after it is what gets cut.
+fn keep_the_end(text: &str, hits: &[u32], width: usize) -> (String, Vec<u32>) {
+    if text.width() <= width {
+        return (text.to_string(), hits.to_vec());
+    }
+    let (head, rest) = match text.strip_prefix('@').and_then(|_| text.find("  ")) {
+        Some(at) => text.split_at(at + 2),
+        None => ("", text),
+    };
+    let head_chars = head.chars().count();
+    let room = width.saturating_sub(head.width());
+    // Kept from the end, leaving one column for the ellipsis.
+    let mut kept = 0;
+    let mut used = 1;
+    for ch in rest.chars().rev() {
+        let w = ch.width().unwrap_or(0);
+        if used + w > room {
+            break;
+        }
+        used += w;
+        kept += 1;
+    }
+    let rest_chars = rest.chars().count();
+    let dropped = rest_chars - kept;
+    let tail: String = rest.chars().skip(dropped).collect();
+    let shown = format!("{head}…{tail}");
+    // Positions in the head stay; in the tail they move left by the chars
+    // dropped, less the one the ellipsis takes; in between they are gone.
+    let moved = hits
+        .iter()
+        .filter_map(|&i| {
+            let i = i as usize;
+            if i < head_chars {
+                Some(i as u32)
+            } else if i >= head_chars + dropped {
+                Some((i - dropped + 1) as u32)
+            } else {
+                None
+            }
+        })
+        .collect();
+    (shown, moved)
 }
 
 /// Shares out the matched characters of `display`, a path relative to the
@@ -3415,7 +3744,9 @@ mod tests {
             found_marks: HashMap::new(),
             tree_rows: 20,
             tree_dirs: HashMap::new(),
-            origin: place_mode(mode),
+            places: None,
+            places_query: String::new(),
+            mouse_places: (Rect::default(), 0, 0),
             browser_root: PathBuf::new(),
             search_mode: first_search(mode),
             unlimited: false,
@@ -4097,11 +4428,10 @@ mod tests {
         assert_eq!(picker.browser().selected_path(), Some(inner.join("x.txt")));
 
         // The tree is remembered: from a search, Tab comes back to it, and a
-        // search started from the tree starts at its root. Favorites is used
-        // because it scans nothing.
+        // search started from the tree starts at its root.
         picker.handle_key(ctrl_space);
         picker.handle_key(key(KeyCode::Char('v')));
-        picker.switch_to(Mode::Favorites);
+        picker.switch_to(Mode::Dirs);
         assert_eq!(picker.root, inner);
         picker.switch_to(Mode::Browse);
         assert!(picker.in_tree());
@@ -4290,6 +4620,99 @@ mod tests {
         drop(_config);
         drop(picker);
         crate::testing::remove_tree(&root);
+    }
+
+    #[test]
+    fn the_favorites_list_opens_over_the_screen_and_enter_or_right_take_a_place() {
+        let root = crate::testing::temp_dir().join(format!("tadoru-places-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("work/inner")).unwrap();
+        std::fs::create_dir_all(root.join("notes")).unwrap();
+        let config = root.join("config");
+        std::fs::create_dir_all(&config).unwrap();
+        let _config = crate::testing::config_dir(&config);
+        let file = crate::favorites::path().unwrap();
+        crate::favorites::pin(&file, &root.join("work"), Some(true), Some("work")).unwrap();
+        crate::favorites::pin(&file, &root.join("notes"), Some(true), Some("notes")).unwrap();
+        let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+        let ctrl = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL);
+        let settle = |picker: &mut Picker| {
+            let source = picker.source_for(Mode::Favorites);
+            source.finish_scan();
+            while source.matcher.tick(TICK_MS).running {}
+            source.clamp_selection();
+        };
+
+        // Over a search, the list takes the typing, and Enter chooses the
+        // place while the search under it keeps what it had.
+        let mut picker = test_picker(root.clone(), Mode::Dirs);
+        picker.set_query("inn");
+        picker.handle_key(ctrl('s'));
+        assert_eq!(picker.places, Some(Mode::Favorites));
+        for c in "not".chars() {
+            picker.handle_key(key(KeyCode::Char(c)));
+        }
+        settle(&mut picker);
+        assert_eq!(picker.places_query, "not");
+        assert_eq!(picker.query, "inn", "the search's own filter is untouched");
+        assert_eq!(picker.selected_path(), Some(root.join("notes")));
+        assert!(matches!(
+            picker.handle_key(key(KeyCode::Enter)),
+            Action::Accept
+        ));
+
+        // Esc clears what was typed first, then closes the list.
+        picker.handle_key(key(KeyCode::Esc));
+        assert_eq!(picker.places_query, "");
+        assert!(picker.places.is_some());
+        picker.handle_key(key(KeyCode::Esc));
+        assert!(picker.places.is_none());
+        assert_eq!(picker.mode, Mode::Dirs);
+
+        // Right takes the search to the place: it starts there, with the
+        // filter cleared, and Ctrl-Left brings both back.
+        picker.handle_key(ctrl('s'));
+        for c in "work".chars() {
+            picker.handle_key(key(KeyCode::Char(c)));
+        }
+        settle(&mut picker);
+        picker.handle_key(key(KeyCode::Right));
+        assert!(picker.places.is_none());
+        assert_eq!(picker.mode, Mode::Dirs);
+        assert_eq!(picker.root, root.join("work"));
+        assert_eq!(picker.query, "");
+        picker.handle_key(ctrl_left());
+        assert_eq!(picker.root, root);
+        assert_eq!(picker.query, "inn");
+
+        // Over browse, Right shows the place in its folder, selected.
+        picker.handle_key(key(KeyCode::Tab));
+        assert_eq!(picker.mode, Mode::Browse);
+        picker.handle_key(ctrl('s'));
+        for c in "work".chars() {
+            picker.handle_key(key(KeyCode::Char(c)));
+        }
+        settle(&mut picker);
+        picker.handle_key(key(KeyCode::Right));
+        assert_eq!(picker.browser().cwd, root);
+        assert_eq!(picker.browser().target(), root.join("work"));
+
+        // The tab bar has no tab for the lists.
+        assert_eq!(
+            tabs(),
+            [
+                (Mode::Dirs, false),
+                (Mode::Files, false),
+                (Mode::Browse, false),
+                (Mode::Browse, true)
+            ]
+        );
+        drop(_config);
+        drop(picker);
+        crate::testing::remove_tree(&root);
+    }
+
+    fn ctrl_left() -> KeyEvent {
+        KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL)
     }
 
     #[test]
@@ -4719,16 +5142,14 @@ mod tests {
             });
         };
 
-        // The four searches share one bracket; browse, which Tab pairs with
+        // The two searches share one bracket; browse, which Tab pairs with
         // them, has its own, with the columns and the tree side by side.
+        // Recent and favorites are lists over the screen, not tabs.
         let mut picker = test_picker(root.clone(), Mode::Browse);
-        find(
-            &top_row(&mut picker),
-            "[dirs|files|recent|favorites]  [browse|tree]",
-        );
+        find(&top_row(&mut picker), "[dirs|files]  [browse|tree]");
 
         // The first and last letter of each label switch to that mode.
-        for mode in MODE_ORDER {
+        for mode in [Mode::Dirs, Mode::Files, Mode::Browse] {
             let start_in = if mode == Mode::Browse {
                 Mode::Dirs
             } else {
@@ -4938,9 +5359,11 @@ mod tests {
         picker.handle_key(ctrl_space);
         assert!(picker.keys.is_some());
         picker.handle_key(plain('s'));
-        assert_eq!(picker.mode, Mode::Favorites);
+        assert_eq!(picker.places, Some(Mode::Favorites));
         assert!(picker.keys.is_none());
         assert_eq!(picker.query, "inner");
+        picker.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(picker.places.is_none());
 
         // Esc closes the panel and nothing else: the filter is still there,
         // where Esc on the picker itself would have cleared it.
@@ -4948,7 +5371,7 @@ mod tests {
         picker.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         assert!(picker.keys.is_none());
         assert_eq!(picker.query, "inner");
-        assert_eq!(picker.mode, Mode::Favorites);
+        assert_eq!(picker.mode, Mode::Dirs);
 
         // A row that stands for a shortcut does what the shortcut does.
         picker.handle_key(ctrl_space);
@@ -4970,24 +5393,29 @@ mod tests {
         let mut picker = test_picker(root.clone(), Mode::Dirs);
         let ctrl = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL);
 
-        for (letter, mode) in [
-            ('s', Mode::Favorites),
-            ('r', Mode::Recent),
-            ('f', Mode::Files),
-            ('d', Mode::Dirs),
-        ] {
-            picker.handle_key(ctrl(letter));
-            assert_eq!(picker.mode, mode, "Ctrl-{letter}");
-        }
-        // From browse, one press instead of Shift-Tab four times over, and
-        // Tab from browse then comes back to the search reached this way.
+        // The lists open over the screen, which stays as it was; the
+        // searches replace it, and close a list that was open.
+        picker.handle_key(ctrl('s'));
+        assert_eq!(picker.places, Some(Mode::Favorites));
+        assert_eq!(picker.mode, Mode::Dirs);
+        picker.handle_key(ctrl('r'));
+        assert_eq!(picker.places, Some(Mode::Recent));
+        picker.handle_key(ctrl('r'));
+        assert!(picker.places.is_none(), "the same key closes the list");
+        picker.handle_key(ctrl('s'));
+        picker.handle_key(ctrl('f'));
+        assert!(picker.places.is_none());
+        assert_eq!(picker.mode, Mode::Files);
+        picker.handle_key(ctrl('d'));
+        assert_eq!(picker.mode, Mode::Dirs);
+        // Over browse too, and Tab from there still goes to the search.
         picker.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
         assert_eq!(picker.mode, Mode::Browse);
         picker.handle_key(ctrl('s'));
-        assert_eq!(picker.mode, Mode::Favorites);
+        assert_eq!(picker.places, Some(Mode::Favorites));
         picker.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
-        picker.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
-        assert_eq!(picker.mode, Mode::Favorites);
+        assert!(picker.places.is_none());
+        assert_eq!(picker.mode, Mode::Dirs);
 
         // The plain letter and AltGr leave the mode alone, and the plain
         // letter is typed into the filter.
@@ -5091,13 +5519,14 @@ mod tests {
         assert_eq!(picker.root, inner);
         drop(picker);
 
-        // Favorites and recent are lists of places to go, so from them Right
-        // goes back to where they were opened from, now at the place chosen.
+        // The lists of places open over the screen, and Right in them takes
+        // the screen to the place chosen: a search goes on from there.
         let mut picker = test_picker(root.clone(), Mode::Files);
         picker.switch_to(Mode::Favorites);
-        assert_eq!(picker.origin, Mode::Files);
+        assert_eq!(picker.places, Some(Mode::Favorites));
         picker.query = "inn".into();
-        picker.go_into(&inner);
+        picker.go_to_place(&inner);
+        assert!(picker.places.is_none());
         assert_eq!(picker.mode, Mode::Files);
         assert_eq!(picker.root, inner);
         // The filter that found the favorite is not carried into it, and going
@@ -5106,28 +5535,20 @@ mod tests {
         picker.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL));
         assert_eq!(picker.root, root);
         assert_eq!(picker.query, "inn");
-        // Through recent on the way to favorites, it is still files it came from.
-        picker.switch_to(Mode::Recent);
-        picker.switch_to(Mode::Favorites);
-        assert_eq!(picker.origin, Mode::Files);
         drop(picker);
 
-        // Opened from browse it is browse that carries on, and a picker opened
-        // straight into a list has nowhere to go back to, so it browses too.
-        // There the favorite is shown in its folder and selected, so Enter
-        // goes to it rather than to whatever sorts first inside it.
-        for start in [Mode::Browse, Mode::Favorites] {
-            let mut picker = test_picker(root.clone(), start);
-            picker.switch_to(Mode::Favorites);
-            picker.go_into(&inner);
-            assert_eq!(picker.mode, Mode::Browse, "{start:?}");
-            assert_eq!(picker.browser().cwd, root.join("only"));
-            assert_eq!(picker.browser().target(), inner);
-            // Right again goes into it.
-            picker.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
-            assert_eq!(picker.browser().cwd, inner);
-            drop(picker);
-        }
+        // Over browse, the place is shown in its folder and selected, so
+        // Enter goes to it rather than to whatever sorts first inside it.
+        let mut picker = test_picker(root.clone(), Mode::Browse);
+        picker.switch_to(Mode::Favorites);
+        picker.go_to_place(&inner);
+        assert_eq!(picker.mode, Mode::Browse);
+        assert_eq!(picker.browser().cwd, root.join("only"));
+        assert_eq!(picker.browser().target(), inner);
+        // Right again goes into it.
+        picker.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+        assert_eq!(picker.browser().cwd, inner);
+        drop(picker);
 
         // A file opens the folder holding it, with the file selected. Ctrl-L
         // stands in for Right here as it does in browse.
@@ -5355,7 +5776,7 @@ mod tests {
                 None,
             ] {
                 let root = std::env::temp_dir().join("tadoru-nonexistent-history-test-root");
-                let mut picker = test_picker(root.clone(), Mode::Recent);
+                let mut picker = test_picker(root.clone(), Mode::Browse);
                 let mut source = Source::start(
                     Mode::Dirs,
                     &root,
@@ -5371,8 +5792,8 @@ mod tests {
                 picker.sources[mode_index(Mode::Recent)] = Some(source);
                 if via_tab {
                     picker.mode = Mode::Files;
-                    picker.switch_to(Mode::Recent);
                 }
+                picker.places = Some(Mode::Recent);
                 let mut terminal = Terminal::new(TestBackend::new(100, 16)).unwrap();
                 terminal
                     .draw(|frame| picker.render(frame.area(), frame))
@@ -5391,9 +5812,13 @@ mod tests {
                 } else {
                     assert!(text.contains("No history yet"));
                 }
-                // The way out the screen names takes the reader to the next list.
-                picker.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
-                assert_eq!(picker.mode, Mode::Favorites);
+                // Esc closes the list and leaves the screen under it alone.
+                picker.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+                assert!(picker.places.is_none());
+                assert_eq!(
+                    picker.mode,
+                    if via_tab { Mode::Files } else { Mode::Browse }
+                );
             }
         }
     }
@@ -5806,6 +6231,21 @@ mod tests {
     }
 
     #[test]
+    fn a_long_place_keeps_its_end_and_its_name_with_the_matches_moved() {
+        // Fits: nothing changes.
+        assert_eq!(keep_the_end("abc", &[0, 2], 10), ("abc".into(), vec![0, 2]));
+        // Cut from the front, one column left for the ellipsis; a hit in the
+        // dropped part goes, the rest move with the text.
+        let (shown, hits) = keep_the_end("0123456789", &[1, 7, 9], 5);
+        assert_eq!(shown, "…6789");
+        assert_eq!(hits, [2, 4]);
+        // The name of a favorite stays whole; its hits stay put.
+        let (shown, hits) = keep_the_end("@work  C:\\a\\b\\work", &[1, 2, 14, 15], 12);
+        assert_eq!(shown, "@work  …work");
+        assert_eq!(hits, [1, 2, 8, 9]);
+    }
+
+    #[test]
     fn matched_letters_are_shared_out_among_the_rows_of_a_path() {
         let sep = std::path::MAIN_SEPARATOR;
         let root = PathBuf::from("r");
@@ -5927,11 +6367,10 @@ mod tests {
     #[test]
     fn shift_tab_steps_through_the_searches_and_skips_browse() {
         assert_eq!(next_search(Mode::Dirs), Mode::Files);
-        assert_eq!(next_search(Mode::Files), Mode::Recent);
-        assert_eq!(next_search(Mode::Recent), Mode::Favorites);
-        assert_eq!(next_search(Mode::Favorites), Mode::Dirs);
+        assert_eq!(next_search(Mode::Files), Mode::Dirs);
         assert_eq!(first_search(Mode::Files), Mode::Files);
         assert_eq!(first_search(Mode::Browse), Mode::Dirs);
+        assert_eq!(first_search(Mode::Recent), Mode::Dirs);
     }
 
     #[test]
@@ -5995,12 +6434,13 @@ mod tests {
         // The search names both ways out: browse, and the next search.
         let shown = hints(&mut picker);
         assert!(shown.contains("Tab: browse"), "{shown}");
-        assert!(shown.contains("S-Tab: recent"), "{shown}");
+        assert!(shown.contains("S-Tab: dirs"), "{shown}");
 
-        // Shift-Tab picks another search, and Tab then pairs browse with that.
+        // Shift-Tab picks the other search, and Tab then pairs browse with that.
         picker.handle_key(back_tab);
-        assert_eq!(picker.mode, Mode::Recent);
+        assert_eq!(picker.mode, Mode::Dirs);
         picker.handle_key(back_tab);
+        assert_eq!(picker.mode, Mode::Files);
         picker.handle_key(back_tab);
         assert_eq!(picker.mode, Mode::Dirs, "Shift-Tab stopped in browse");
         picker.handle_key(tab);
@@ -6027,11 +6467,11 @@ mod tests {
         // A click on a tab goes to that mode, and a search reached that way
         // is the one Tab comes back to.
         let mut picker = test_picker(root.clone(), Mode::Dirs);
-        picker.switch_to(Mode::Favorites);
+        picker.switch_to(Mode::Files);
         picker.handle_key(tab);
         assert_eq!(picker.mode, Mode::Browse);
         picker.handle_key(tab);
-        assert_eq!(picker.mode, Mode::Favorites);
+        assert_eq!(picker.mode, Mode::Files);
 
         crate::testing::remove_tree(&root);
     }

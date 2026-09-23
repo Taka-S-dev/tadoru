@@ -76,7 +76,7 @@ Change directory only on `0`. A wrapper that does not tell `1` from `2` hides er
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--mode <mode>` | `dirs` | `dirs`, `files`, `recent`, `favorites` or `browse`. The screen it opens in; Tab and Shift-Tab still change it |
+| `--mode <mode>` | `dirs` | `dirs`, `files` or `browse`, the screen it opens in; Tab and Shift-Tab still change it. `recent` or `favorites` opens that list over browse of the folder |
 | `--query <text>` | empty | What the filter starts with. The environment variable `TADORU_QUERY` wins over it |
 | `--root <folder>` | current folder | Where the search starts. `@name` is the favorite of that name; so is `@name` as the first word of the query |
 | `--select-1` | off | With exactly one candidate, print it without opening the screen |
@@ -164,5 +164,4 @@ folders it takes you to with `zoxide add`.
 
 tadoru replaces zoxide's `z` and `zi` with its own. Its `z` records where you came from, so `c -`
 can take you back, and its `zi` picks from tadoru's list. To keep zoxide's own `z` and `zi`, add
-`--no-z`. Then open recent from `c` by pressing Shift-Tab twice, or by clicking recent on the top
-border.
+`--no-z`. Then open the recent places from `c` with Ctrl-R.

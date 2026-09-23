@@ -85,9 +85,10 @@ zoxide の `z` と `zi` には手を付けない。詳しくは[導入の詳細�
 ![Tab で 3 列の browse、Shift-Tab でツリー表示、そこで文字を打つと下の階層全体を検索、Right で一致した場所までツリーを開く](docs/images/screen.gif)
 
 Tab で検索と browse を行き来する。browse から戻る先は直前に使っていた検索で、
-`cf` で開いたなら files と browse の往復になる。検索の種類は Shift-Tab で
-dirs → files → recent → favorites と切り替え、browse では 3 列とツリー表示を切り替える。
-上枠のモード名はクリックでも切り替わる。
+`cf` で開いたなら files と browse の往復になる。Shift-Tab は dirs と files を、
+browse では 3 列とツリー表示を切り替える。上枠のモード名はクリックでも切り替わる。
+お気に入りと最近の場所は画面ではなく、今の画面の上に開く一覧。Ctrl-S と Ctrl-R で開き、
+Enter でそこへ cd、Right で今の画面をそこへ移し、Esc で閉じる。
 どのモードでも、文字を打てば絞り込み、Enter でそこへ cd。文字は間が空いていても順に一致する（あいまい一致）。
 `'word` のように先頭に `'` を付けると、fzf と同じく続けて並んだものだけに一致する（[書き方の一覧](docs/guide/screen.md#what-typing-matches)）。
 Esc は絞り込みを消し、空の状態でもう一度押すと終了する。Ctrl-C はいつでも終了する。
@@ -96,15 +97,16 @@ Esc は絞り込みを消し、空の状態でもう一度押すと終了する�
 |---|---|
 | Ctrl-Space | キーの一覧を開く。そこでは修飾キーなしの 1 文字で実行できる（`s` で favorites など）。Esc で閉じる |
 | Tab | 検索と browse を行き来する。戻る先は直前に使っていた検索 |
-| Shift-Tab | 検索の種類を切り替える。browse では 3 列とツリー表示を切り替える（ツリーはフォルダをその場で開閉でき、文字を打つと下の階層全体を探す） |
-| Ctrl-D / Ctrl-F / Ctrl-R / Ctrl-S | dirs・files・recent・favorites へ直接切り替える（S は ★ の starred） |
+| Shift-Tab | dirs と files を切り替える。browse では 3 列とツリー表示を切り替える（ツリーはフォルダをその場で開閉でき、文字を打つと下の階層全体を探す） |
+| Ctrl-D / Ctrl-F | dirs・files へ直接切り替える |
+| Ctrl-S / Ctrl-R | お気に入り（S は ★ の starred）・最近の場所の一覧を画面の上に開く。文字で絞り込み、Enter でそこへ cd、Right で今の画面をそこへ移して続ける、Esc で閉じる |
 | Ctrl-B | 選択中のフォルダをお気に入りに登録・解除 |
 | Ctrl-N | 選択中のフォルダのお気に入りに名前を付ける（`c @name` で使う）。空で保存すると名前を外す |
 | Ctrl-P | 選択中の項目に対するアクションメニュー |
 | Ctrl-A | 走査が上限で止まったとき、上限を外して集め直す |
 | F5 | 一覧とプレビューを更新 |
 | Left | 検索範囲を 1 段広げる。browse では階層を上がる。Windows ではドライブの最上位から、ドライブの一覧へ |
-| Right | 選択先に入って続ける。dirs・files ではそこを browse で開く。favorites・recent では、開く前にいたモードにその場所を起点として戻る。browse では階層を下る |
+| Right | 選択先に入って続ける。dirs・files ではそこを browse で開く。browse では階層を下る。一覧の中では今の画面をその場所へ移す（検索はそこを起点に、browse はそこを選択した状態に） |
 | Ctrl+← / Ctrl+→ | 訪問履歴を戻る・進む。browse は移動先、検索は起点。Alt+← / Alt+→ でも同じ。Ctrl-T でも戻る（Vim のタグジャンプから戻るのと同じ） |
 
 上枠の下のパスは、その検索が対象にしているフォルダ。階層名をクリックすると
