@@ -30,15 +30,16 @@ struct Favorites {
 }
 
 /// What a name has to be to stand for a favorite: a word with no spaces,
-/// not starting with the @ that marks it when it is used, and no path
-/// separators, so it can never be taken for a folder.
+/// not starting with the colon that marks it when it is used, and no path
+/// separators, so it can never be taken for a folder. Why the mark is a
+/// colon is with `favorite_or_path`, which reads it.
 pub fn check_name(name: &str) -> Result<(), Error> {
     if name.is_empty() {
         return Err("a favorite's name cannot be empty".into());
     }
-    if name.starts_with('@') {
+    if name.starts_with(':') {
         return Err(
-            "a favorite's name is written without the @; that is added when it is used".into(),
+            "a favorite's name is written without the colon; that is added when it is used".into(),
         );
     }
     if name
@@ -190,7 +191,7 @@ pub fn pin(
                 && !same_path(&favorite.path, &directory)
         })
     {
-        return Err(format!("@{name} already names {}", taken.path.display()).into());
+        return Err(format!(":{name} already names {}", taken.path.display()).into());
     }
     if add == present && (!add || name.is_none()) {
         return Ok(add);
@@ -337,7 +338,7 @@ mod tests {
         assert_eq!(read(&file).unwrap().len(), 2);
         set_name(&file, &a, Some("again")).unwrap();
         assert!(find(&file, "again").unwrap().is_some());
-        for bad in ["", "@work", "my work", "a/b"] {
+        for bad in ["", ":work", "my work", "a/b"] {
             assert!(check_name(bad).is_err(), "{bad:?}");
         }
         fs::remove_dir_all(root).unwrap();

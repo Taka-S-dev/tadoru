@@ -11,7 +11,7 @@ The name is Japanese (辿る) for following a path to where it leads. Written in
 - You remember the folder's name: `c openssl`
 - You only know a file's name: `cf Cargo.toml` takes you to the folder holding it
 - You want to look around: open `c` and press Tab to browse
-- You go there often: pin it as `work`, and `c @work` searches from it wherever you are
+- You go there often: pin it as `work`, and `c :work` searches from it wherever you are
 
 `c`, `cf`, browse and favorites need nothing else.
 `z`, `zi` and recent read the history kept by `zoxide` (if it is missing, the screen says how to get it).
@@ -104,7 +104,7 @@ Esc clears the filter, and pressed again on an empty filter it quits. Ctrl-C alw
 | Ctrl-D / Ctrl-F | Go straight to dirs or files |
 | Ctrl-S / Ctrl-R | Open the favorites (S for starred) or the recent places over the screen, as does a click on `favorites` or `recent` after the tabs. Typing filters them; Enter cds there, Right or a double click takes the screen there and keeps going, Esc closes |
 | Ctrl-B | Pin or unpin the selected folder as a favorite |
-| Ctrl-N | Name the selected folder's favorite, for `c @name`; an empty name takes the name away |
+| Ctrl-N | Name the selected folder's favorite, for `c :name`; an empty name takes the name away |
 | Ctrl-P | Open the action menu for the selected item |
 | Ctrl-A | When a scan stopped at its limit, collect the rest |
 | F5 | Refresh the list and the preview |

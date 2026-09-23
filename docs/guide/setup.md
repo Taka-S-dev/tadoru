@@ -78,7 +78,7 @@ Change directory only on `0`. A wrapper that does not tell `1` from `2` hides er
 |---|---|---|
 | `--mode <mode>` | `dirs` | `dirs`, `files` or `browse`, the screen it opens in; Tab and Shift-Tab still change it. `recent` or `favorites` opens that list over browse of the folder |
 | `--query <text>` | empty | What the filter starts with. The environment variable `TADORU_QUERY` wins over it |
-| `--root <folder>` | current folder | Where the search starts. `@name` is the favorite of that name; so is `@name` as the first word of the query |
+| `--root <folder>` | current folder | Where the search starts. `:name` is the favorite of that name; so is `:name` as the first word of the query |
 | `--select-1` | off | With exactly one candidate, print it without opening the screen |
 | `--on-accept <action>` | none | Run an action on the chosen folder instead of printing it; see below |
 

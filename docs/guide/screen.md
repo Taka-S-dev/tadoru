@@ -136,7 +136,7 @@ easiest way to hit the limit, so go back somewhere deeper before switching.
 
 On Windows, recursive `dirs` and `files` scans of network locations are refused before they start.
 This covers UNC paths, drive letters mapped to network drives, and drives whose type cannot be
-determined. A search asked to start on one, as `c @net` does when the favorite is a share, opens in
+determined. A search asked to start on one, as `c :net` does when the favorite is a share, opens in
 `browse` instead and says why at the bottom of the screen; so does Right on such a place in the
 favorites or recent list. From a search that has moved onto one, press Tab to switch to `browse`; F5
 does not lift the restriction. Typing in the tree view is refused the same way, and the tree says
@@ -253,20 +253,22 @@ tadoru favorite add
 tadoru favorite add "C:\work\my project"
 tadoru favorite add --name work "C:\work\my project"
 tadoru favorite remove "C:\work\my project"
-tadoru favorite remove @work
+tadoru favorite remove :work
 tadoru favorite list
 ```
 
 A favorite can have a **name**. On the screen, **Ctrl-N** opens a one-line prompt for the selected
 folder's name: Enter saves it, Esc leaves things as they were, and saving an empty name takes the
 name away while the folder stays pinned; a folder not pinned yet is pinned by naming it. From the
-command line the name is given with `--name` when pinning; pinning a pinned folder again with a
-name gives it that name. The name is a single word without spaces or slashes, and is matched
-without regard to case. Written as `@name`, it stands for the folder wherever a starting point is
-given: `c @work` searches from that favorite instead of the current folder, `c @work src` searches
-it for `src`, `cf @work` does the same for files, and `--root @work` does it for a picker started by
-hand or from a launcher. The favorites list shows the name before the path, so typing the name
-finds it there too. A name nobody has given is refused with a message, not searched for.
+command line the name is given with `--name` when pinning; pinning a pinned folder again with a name
+gives it that name. The name is a single word without spaces or slashes, and is matched without
+regard to case. Written as `:name`, it stands for the folder wherever a starting point is given: `c
+:work` searches from that favorite instead of the current folder, `c :work src` searches it for
+`src`, `cf :work` does the same for files, and `--root :work` does it for a picker started by hand
+or from a launcher. The mark is a colon because it goes through PowerShell, cmd and bash as typed,
+where PowerShell reads `@work` as splatting and hands the command nothing. The favorites list shows
+the name before the path, so typing the name finds it there too. A name nobody has given is refused
+with a message, not searched for.
 
 They are saved in `favorites.toml`, in the same folder as the configuration files, one `[[favorite]]`
 table each; a file from before names existed is still read. Saving takes a lock, so pinning from

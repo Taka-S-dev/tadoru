@@ -355,7 +355,7 @@ fn push_saved(injector: &Injector<Entry>, mode: Mode) -> Result<(), String> {
                 let name = favorite
                     .name
                     .as_ref()
-                    .map(|n| format!("@{n}"))
+                    .map(|n| format!(":{n}"))
                     .unwrap_or_default();
                 std::borrow::Cow::Owned(format!(
                     "{name:<width$}  {}",

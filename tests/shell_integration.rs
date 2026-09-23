@@ -504,7 +504,7 @@ fn favorites_cli_and_picker_share_persistent_storage_without_zoxide() {
     assert_eq!(String::from_utf8(output.stdout).unwrap(), listed);
 
     // Pinned again with a name, the favorite gains it: the list shows it,
-    // and @name stands for the folder as a root, as the first word of a
+    // and :name stands for the folder as a root, as the first word of a
     // query, and in favorite remove.
     check(
         command()
@@ -516,7 +516,7 @@ fn favorites_cli_and_picker_share_persistent_storage_without_zoxide() {
     let output = command().args(["favorite", "list"]).output().unwrap();
     let listed = String::from_utf8(output.stdout).unwrap();
     assert_eq!(listed.lines().count(), 1);
-    assert!(listed.starts_with("@work  "), "{listed}");
+    assert!(listed.starts_with(":work  "), "{listed}");
     let inner = fixture.destination.join("inner");
     std::fs::create_dir(&inner).unwrap();
     let expected = format!(
@@ -524,7 +524,7 @@ fn favorites_cli_and_picker_share_persistent_storage_without_zoxide() {
 ",
         inner.display()
     );
-    for (root, query) in [(Some("@Work"), ""), (None, "@work"), (None, "@work inn")] {
+    for (root, query) in [(Some(":Work"), ""), (None, ":work"), (None, ":work inn")] {
         let mut run = command();
         run.args(["pick", "--mode", "dirs", "--select-1"]);
         if let Some(root) = root {
@@ -540,11 +540,11 @@ fn favorites_cli_and_picker_share_persistent_storage_without_zoxide() {
         );
     }
     let output = command()
-        .args(["pick", "--mode", "dirs", "--root", "@nowhere"])
+        .args(["pick", "--mode", "dirs", "--root", ":nowhere"])
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("no favorite named @nowhere"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("no favorite named :nowhere"));
     // The favorites list shows the name before the path and cds to the path.
     let output = command()
         .args(["pick", "--mode", "favorites", "--select-1"])
@@ -560,7 +560,7 @@ fn favorites_cli_and_picker_share_persistent_storage_without_zoxide() {
     );
     check(
         command()
-            .args(["favorite", "remove", "@work"])
+            .args(["favorite", "remove", ":work"])
             .output()
             .unwrap(),
     );

@@ -459,7 +459,7 @@ pub fn run(args: PickArgs, root: PathBuf, config: Config) -> Result<Option<PathB
 }
 
 /// The screen a picker opens in, given the one asked for and where. A search
-/// that cannot scan its root, such as `c @net` on a favorite that is a share,
+/// that cannot scan its root, such as `c :net` on a favorite that is a share,
 /// opens in browse instead, and says why: a refused search shows nothing but
 /// the refusal, while browse lists the folder one level at a time.
 fn opening_screen(asked: Mode, root: &Path) -> (Mode, Option<String>) {
@@ -1735,7 +1735,7 @@ impl Picker {
                         self.set_transient_notice(if name.is_empty() {
                             format!("Name removed: {}", path.display())
                         } else {
-                            format!("Named @{name}: {}", path.display())
+                            format!("{} is now :{name}", path.display())
                         });
                     }
                     Err(error) => self.set_notice(format!("Cannot name the favorite: {error}")),
@@ -2145,7 +2145,7 @@ impl Picker {
                 || path.to_string_lossy().into_owned(),
                 |name| name.to_string_lossy().into_owned(),
             );
-            let lead = format!(" Name for {}: @", fit(&shown, area.width as usize / 3));
+            let lead = format!(" Name {} as :", fit(&shown, area.width as usize / 3));
             let hint = "  Enter: save  Esc: cancel ";
             let line = Line::from(vec![
                 Span::styled(lead.clone(), theme::HEADER),
@@ -3591,13 +3591,13 @@ fn match_spans(text: &str, indices: &[u32]) -> Vec<Span<'static>> {
 
 /// `text` cut to `width` columns from the front, since the end of a path is
 /// what tells places apart, with `hits` (sorted char positions) moved to
-/// match. A favorite's name, the `@name` before the two spaces, is kept
+/// match. A favorite's name, the `:name` before the two spaces, is kept
 /// whole and the path after it is what gets cut.
 fn keep_the_end(text: &str, hits: &[u32], width: usize) -> (String, Vec<u32>) {
     if text.width() <= width {
         return (text.to_string(), hits.to_vec());
     }
-    let (head, rest) = match text.strip_prefix('@').and_then(|_| text.find("  ")) {
+    let (head, rest) = match text.strip_prefix(':').and_then(|_| text.find("  ")) {
         Some(at) => text.split_at(at + 2),
         None => ("", text),
     };
@@ -4736,7 +4736,7 @@ mod tests {
             .expect("named");
         assert_eq!(named.path, root.join("work"));
         assert!(picker.pinned.contains(&root.join("work")));
-        assert!(picker.notice.as_deref().unwrap().starts_with("Named @work"));
+        assert!(picker.notice.as_deref().unwrap().ends_with("is now :work"));
 
         // Opens on the name it has; Esc changes nothing, an empty name clears it.
         picker.handle_key(ctrl('n'));
@@ -6490,8 +6490,8 @@ mod tests {
         assert_eq!(shown, "…6789");
         assert_eq!(hits, [2, 4]);
         // The name of a favorite stays whole; its hits stay put.
-        let (shown, hits) = keep_the_end("@work  C:\\a\\b\\work", &[1, 2, 14, 15], 12);
-        assert_eq!(shown, "@work  …work");
+        let (shown, hits) = keep_the_end(":work  C:\\a\\b\\work", &[1, 2, 14, 15], 12);
+        assert_eq!(shown, ":work  …work");
         assert_eq!(hits, [1, 2, 8, 9]);
     }
 
