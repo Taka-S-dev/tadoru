@@ -11,6 +11,8 @@ on stay in view. It grows to fit its longest action, above a minimum width, and 
 names the item; a long path keeps its end, where the name is. A terminal too small for the panel
 gives the menu the whole screen.
 
+![The action menu over browse: the built-in actions, then Git status and Git log from the example configuration, each with its key](../images/actions.png)
+
 When the menu opens it waits for a key: each row reads `f → Open in file manager`, and pressing the
 letter at the left of the arrow runs that action, with no modifier. You can also pick with the arrow
 keys and press Enter, or click.
