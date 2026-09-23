@@ -1,6 +1,7 @@
 //! Helpers shared by the unit tests.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
 
 /// The temporary directory with any 8.3 short components resolved.
 ///
@@ -16,6 +17,36 @@ pub fn temp_dir() -> PathBuf {
     // differ from every path the tests build by hand.
     let text = canonical.to_string_lossy().into_owned();
     PathBuf::from(text.strip_prefix(r"\\?\").unwrap_or(&text))
+}
+
+/// Where the configuration folder is for the test holding a `ConfigDir`,
+/// read by `Config::path` before anything else. Tests run in parallel in
+/// one process, so this is a slot under a lock rather than the environment
+/// variable, which cannot be changed safely while other threads read it.
+static CONFIG_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+/// Holds the slot for one test at a time, so two tests that point the
+/// configuration somewhere never run over each other.
+static CONFIG_DIR_TURN: Mutex<()> = Mutex::new(());
+
+pub struct ConfigDir(#[allow(dead_code)] MutexGuard<'static, ()>);
+
+/// Points the configuration folder at `dir` until the guard is dropped.
+/// A test that needs it waits for the one holding it.
+pub fn config_dir(dir: &Path) -> ConfigDir {
+    let turn = CONFIG_DIR_TURN.lock().unwrap_or_else(|e| e.into_inner());
+    *CONFIG_DIR.lock().unwrap_or_else(|e| e.into_inner()) = Some(dir.to_path_buf());
+    ConfigDir(turn)
+}
+
+impl Drop for ConfigDir {
+    fn drop(&mut self) {
+        *CONFIG_DIR.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+}
+
+pub fn config_dir_override() -> Option<PathBuf> {
+    CONFIG_DIR.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
 /// Delete a fixture tree, waiting out a scanner that has not stopped yet.

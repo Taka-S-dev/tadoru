@@ -4252,10 +4252,8 @@ mod tests {
         let config = root.join("config");
         std::fs::create_dir_all(&config).unwrap();
         // The picker reads and writes favorites through the configuration
-        // folder, which the environment points at for this test.
-        // SAFETY: tests in this module that touch the environment run one at
-        // a time on their own folders.
-        unsafe { std::env::set_var("TADORU_CONFIG_DIR", &config) };
+        // folder, pointed at this test's own for as long as the guard lives.
+        let _config = crate::testing::config_dir(&config);
         let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
         let ctrl = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL);
         let mut picker = test_picker(root.clone(), Mode::Browse);
@@ -4289,7 +4287,7 @@ mod tests {
         picker.handle_key(key(KeyCode::Enter));
         assert!(crate::favorites::find(&file, "work").unwrap().is_none());
         assert!(picker.pinned.contains(&root.join("work")), "still pinned");
-        unsafe { std::env::remove_var("TADORU_CONFIG_DIR") };
+        drop(_config);
         drop(picker);
         crate::testing::remove_tree(&root);
     }

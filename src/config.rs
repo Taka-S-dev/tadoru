@@ -44,6 +44,10 @@ impl Default for Config {
 impl Config {
     /// Explicit override, portable `config/` beside the executable, then user config.
     pub fn path() -> Option<PathBuf> {
+        #[cfg(test)]
+        if let Some(dir) = crate::testing::config_dir_override() {
+            return Some(dir.join("config.toml"));
+        }
         // An explicit override also isolates subprocess tests on Windows, where
         // Known Folder APIs do not follow a replaced APPDATA environment variable.
         if let Some(dir) = std::env::var_os("TADORU_CONFIG_DIR").filter(|dir| !dir.is_empty()) {
@@ -119,9 +123,7 @@ mod tests {
     fn init_writes_once_and_refuses_to_overwrite() {
         let root = crate::testing::temp_dir().join(format!("tadoru-cfg-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
-        // Safe to set here: the tests in this file run in one process and the
-        // override is read on every call.
-        unsafe { std::env::set_var("TADORU_CONFIG_DIR", &root) };
+        let _config = crate::testing::config_dir(&root);
 
         let path = init().expect("the first run writes the file");
         assert_eq!(path, root.join("config.toml"));
@@ -141,7 +143,7 @@ mod tests {
 "
         );
 
-        unsafe { std::env::remove_var("TADORU_CONFIG_DIR") };
+        drop(_config);
         std::fs::remove_dir_all(&root).unwrap();
     }
 
